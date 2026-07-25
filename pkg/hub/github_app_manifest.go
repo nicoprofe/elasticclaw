@@ -145,14 +145,20 @@ func buildGitHubAppManifest(appName, hubBaseURL, redirectURL, webhookURL string,
 		},
 		DefaultEvents: []string{"issues", "pull_request", "pull_request_review", "check_suite"},
 	}
-	// GitHub validates that a hook url is present and rejects the whole manifest
-	// with "Hook url cannot be blank" when it is missing — so it is always sent.
-	// A loopback hub cannot receive deliveries, so the hook is marked inactive
-	// instead of omitted: the App is created, and GitHub does not accumulate
-	// failed deliveries against an address it can never reach. Issue triggers
-	// still work by polling.
-	if webhookURL != "" {
-		m.HookAttributes = map[string]any{"url": webhookURL, "active": webhookActive}
+	// GitHub imposes two constraints that look contradictory until you disable
+	// webhooks explicitly:
+	//
+	//   omit hook_attributes            -> "Hook url cannot be blank"
+	//   send a 127.0.0.1 url            -> "Hook url is not supported because it
+	//                                      isn't reachable over the public Internet"
+	//
+	// So a hub GitHub cannot reach declares the webhook inactive and sends no url
+	// at all, which is how a manifest asks for an App without webhooks. Issue
+	// triggers still work by polling, which is what a local hub relies on anyway.
+	if webhookActive && webhookURL != "" {
+		m.HookAttributes = map[string]any{"url": webhookURL, "active": true}
+	} else {
+		m.HookAttributes = map[string]any{"active": false}
 	}
 	return m
 }
