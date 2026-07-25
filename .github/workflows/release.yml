@@ -44,8 +44,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          # No npm cache: web/package-lock.json is intentionally git-ignored, and
+          # setup-node's cache requires a committed lockfile to key on. The root
+          # package-lock.json is a stub and does not describe the web build.
 
       - name: Verify the tree builds and tests pass
         run: |
