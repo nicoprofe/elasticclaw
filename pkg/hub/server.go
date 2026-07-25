@@ -97,8 +97,6 @@ type Server struct {
 	fireworksModelsCacheUntil time.Time
 	modelAuthJobsMu           sync.Mutex
 	modelAuthJobs             map[string]*modelAuthLoginJob
-	manifestStates            manifestStateStore
-	manifestTickets           manifestStateStore
 	modelAuthRefreshMu        sync.Mutex
 	modelAuthPending          map[string]string // rotated auth state awaiting durable config persistence
 	grokTokenEndpoint         string            // test seam; defaults to the xAI OAuth token endpoint

@@ -2,8 +2,6 @@ package hub
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,7 +11,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/elasticclaw/elasticclaw/pkg/types"
@@ -34,66 +31,6 @@ import (
 // preferable to registering one central App.
 //
 // https://docs.github.com/apps/sharing-github-apps/registering-a-github-app-from-a-manifest
-
-// manifestState links the redirect GitHub sends back to the workspace that
-// started the flow. It doubles as the CSRF token: the callback arrives as a
-// plain browser redirect and cannot carry a bearer token, so the state value is
-// the only thing proving the request came from a flow we started.
-type manifestState struct {
-	Workspace string
-	CreatedAt time.Time
-}
-
-type manifestStateStore struct {
-	mu     sync.Mutex
-	states map[string]manifestState
-}
-
-// manifestStateTTL bounds how long a started flow stays valid. Long enough to
-// read GitHub's permission list and decide, short enough that an abandoned state
-// is not left usable.
-const manifestStateTTL = 15 * time.Minute
-
-func (s *manifestStateStore) put(state string, v manifestState) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.states == nil {
-		s.states = map[string]manifestState{}
-	}
-	// Opportunistically drop expired entries; this map only grows when a user
-	// starts flows they never finish.
-	for k, existing := range s.states {
-		if time.Since(existing.CreatedAt) > manifestStateTTL {
-			delete(s.states, k)
-		}
-	}
-	s.states[state] = v
-}
-
-// take returns the state exactly once, so a redirect cannot be replayed.
-func (s *manifestStateStore) take(state string) (manifestState, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	v, ok := s.states[state]
-	if !ok {
-		return manifestState{}, false
-	}
-	delete(s.states, state)
-	if time.Since(v.CreatedAt) > manifestStateTTL {
-		return manifestState{}, false
-	}
-	return v, true
-}
-
-func urlPathEscape(s string) string { return url.PathEscape(s) }
-
-func randomManifestState() (string, error) {
-	buf := make([]byte, 24)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(buf), nil
-}
 
 // appHomepageURL is the "url" the manifest declares: the App's homepage, shown on
 // its GitHub page. It must be publicly reachable — GitHub rejects a loopback
@@ -116,6 +53,8 @@ func appHomepageURL() string {
 // taken" — a dead end for anyone who is not going to think to rename it.
 // Qualifying with the workspace makes a collision unlikely, and GitHub still lets
 // the name be edited on the creation page if it happens.
+func urlPathEscape(s string) string { return url.PathEscape(s) }
+
 func defaultAppName(workspace string) string {
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" || strings.EqualFold(workspace, "elasticclaw") {
@@ -229,12 +168,11 @@ func (s *Server) handleGitHubAppManifestStart(w http.ResponseWriter, r *http.Req
 		appName = defaultAppName(workspace)
 	}
 
-	state, err := randomManifestState()
+	state, err := signManifestState(s.webSessionSecret(), workspace)
 	if err != nil {
-		http.Error(w, "could not start GitHub setup", http.StatusInternalServerError)
+		http.Error(w, "could not start GitHub setup: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.manifestStates.put(state, manifestState{Workspace: workspace, CreatedAt: time.Now()})
 
 	base := hubBaseURLFromRequest(r)
 	webhookURL, webhookActive := manifestWebhook(base, workspace, r.Host)
@@ -255,12 +193,11 @@ func (s *Server) handleGitHubAppManifestStart(w http.ResponseWriter, r *http.Req
 	// ticket. Without one, anyone who could reach the hub could start a flow and
 	// have the hub store an App created under *their* GitHub account, which would
 	// hand them control of the tokens the hub mints.
-	ticket, err := randomManifestState()
+	ticket, err := signManifestState(s.webSessionSecret(), workspace)
 	if err != nil {
-		http.Error(w, "could not start GitHub setup", http.StatusInternalServerError)
+		http.Error(w, "could not start GitHub setup: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.manifestTickets.put(ticket, manifestState{Workspace: workspace, CreatedAt: time.Now()})
 
 	jsonOK(w, map[string]interface{}{
 		"openUrl":  base + "/api/github/app-manifest/open?ticket=" + url.QueryEscape(ticket),
@@ -280,12 +217,11 @@ func (s *Server) handleGitHubAppManifestLaunch(w http.ResponseWriter, r *http.Re
 	}
 	workspace := strings.TrimSpace(r.URL.Query().Get("workspace"))
 
-	ticket, err := randomManifestState()
+	ticket, err := signManifestState(s.webSessionSecret(), workspace)
 	if err != nil {
-		http.Error(w, "could not start GitHub setup", http.StatusInternalServerError)
+		http.Error(w, "could not start GitHub setup: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.manifestTickets.put(ticket, manifestState{Workspace: workspace, CreatedAt: time.Now()})
 
 	openURL := hubBaseURLFromRequest(r) + "/api/github/app-manifest/open?ticket=" + url.QueryEscape(ticket)
 
@@ -344,20 +280,19 @@ func (s *Server) handleGitHubAppManifestOpen(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "missing ticket", http.StatusBadRequest)
 		return
 	}
-	pending, ok := s.manifestTickets.take(ticket)
+	workspace, ok := verifyManifestState(s.webSessionSecret(), ticket)
 	if !ok {
-		http.Error(w, "this GitHub setup link has already been used or expired — start again from the app", http.StatusBadRequest)
+		http.Error(w, "this GitHub setup link has expired — start again from the app", http.StatusBadRequest)
 		return
 	}
 
-	state, err := randomManifestState()
+	state, err := signManifestState(s.webSessionSecret(), workspace)
 	if err != nil {
-		http.Error(w, "could not start GitHub setup", http.StatusInternalServerError)
+		http.Error(w, "could not start GitHub setup: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.manifestStates.put(state, manifestState{Workspace: pending.Workspace, CreatedAt: time.Now()})
 
-	target, err := s.manifestCreateURL(r, pending.Workspace, state)
+	target, err := s.manifestCreateURL(r, workspace, state)
 	if err != nil {
 		http.Error(w, "could not build the GitHub setup URL: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -401,9 +336,8 @@ func (s *Server) handleGitHubAppManifestCallback(w http.ResponseWriter, r *http.
 		http.Error(w, "missing code or state", http.StatusBadRequest)
 		return
 	}
-	pending, ok := s.manifestStates.take(state)
+	workspace, ok := verifyManifestState(s.webSessionSecret(), state)
 	if !ok {
-		// Unknown, replayed, or expired state.
 		http.Error(w, "this GitHub setup link is no longer valid — start again from the app", http.StatusBadRequest)
 		return
 	}
@@ -414,7 +348,7 @@ func (s *Server) handleGitHubAppManifestCallback(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if err := s.saveManifestGitHubApp(pending.Workspace, app); err != nil {
+	if err := s.saveManifestGitHubApp(workspace, app); err != nil {
 		http.Error(w, "could not save the GitHub App: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

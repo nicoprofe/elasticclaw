@@ -1,10 +1,14 @@
 package hub
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	neturl "net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -87,50 +91,6 @@ func TestIsLoopbackHost(t *testing.T) {
 	}
 }
 
-// The state is the only thing authorizing the callback, since GitHub redirects a
-// browser that cannot carry a bearer token. It must therefore work exactly once.
-func TestManifestStateIsSingleUse(t *testing.T) {
-	var store manifestStateStore
-	store.put("abc", manifestState{Workspace: "demo", CreatedAt: time.Now()})
-
-	got, ok := store.take("abc")
-	if !ok || got.Workspace != "demo" {
-		t.Fatalf("first take = (%+v, %v), want the stored state", got, ok)
-	}
-	if _, ok := store.take("abc"); ok {
-		t.Error("state was accepted twice — a callback could be replayed")
-	}
-}
-
-func TestManifestStateRejectsUnknownAndExpired(t *testing.T) {
-	var store manifestStateStore
-	if _, ok := store.take("never-issued"); ok {
-		t.Error("an unissued state was accepted")
-	}
-
-	store.put("stale", manifestState{Workspace: "demo", CreatedAt: time.Now().Add(-manifestStateTTL - time.Minute)})
-	if _, ok := store.take("stale"); ok {
-		t.Error("an expired state was accepted")
-	}
-}
-
-func TestRandomManifestStateIsUnguessable(t *testing.T) {
-	seen := map[string]bool{}
-	for i := 0; i < 50; i++ {
-		s, err := randomManifestState()
-		if err != nil {
-			t.Fatalf("randomManifestState: %v", err)
-		}
-		if len(s) < 24 {
-			t.Fatalf("state %q is too short to resist guessing", s)
-		}
-		if seen[s] {
-			t.Fatalf("state %q repeated", s)
-		}
-		seen[s] = true
-	}
-}
-
 func TestHubBaseURLFromRequestHonoursForwardedProto(t *testing.T) {
 	// Behind a TLS-terminating proxy the redirect must be https, or GitHub
 	// returns the user to a URL the browser refuses to post to.
@@ -210,5 +170,64 @@ func TestManifestHandoffIsAGetWithTheManifestInTheQuery(t *testing.T) {
 	}
 	if u, _ := m["url"].(string); !strings.HasPrefix(u, "https://") {
 		t.Errorf("homepage url %q must be public", u)
+	}
+}
+
+// The setup state used to live in memory, so restarting the hub — which every
+// upgrade does — silently invalidated links already handed out. A user who created
+// the App during that window had it created for real while the callback was
+// rejected, and GitHub returns the private key only once, so it was unrecoverable.
+// Signing the state means a restart no longer breaks a flow in progress.
+func TestSignedManifestStateSurvivesRestartAndCarriesWorkspace(t *testing.T) {
+	const secret = "hub-token-that-persists-in-hub-yaml"
+
+	state, err := signManifestState(secret, "agent-race")
+	if err != nil {
+		t.Fatalf("signManifestState: %v", err)
+	}
+	// A fresh Server value stands in for a restarted hub: nothing is remembered,
+	// only the secret from hub.yaml is available.
+	ws, ok := verifyManifestState(secret, state)
+	if !ok || ws != "agent-race" {
+		t.Errorf("verify after restart = (%q, %v), want (agent-race, true)", ws, ok)
+	}
+}
+
+func TestSignedManifestStateRejectsTamperingAndOtherHubs(t *testing.T) {
+	const secret = "hub-token"
+	state, err := signManifestState(secret, "agent-race")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := verifyManifestState("a-different-hubs-token", state); ok {
+		t.Error("state signed by one hub was accepted by another")
+	}
+	// Swapping the workspace must not be possible: it decides which workspace the
+	// callback writes an App and private key into.
+	forged, _ := signManifestState(secret, "agent-race")
+	encoded, sig, _ := strings.Cut(forged, ".")
+	_ = encoded
+	if _, ok := verifyManifestState(secret, "ZGVmYXVsdHwyNTI0NjA4MDAw."+sig); ok {
+		t.Error("a swapped payload kept a valid signature")
+	}
+	if _, ok := verifyManifestState(secret, "not-a-state"); ok {
+		t.Error("malformed state accepted")
+	}
+	if _, ok := verifyManifestState(secret, ""); ok {
+		t.Error("empty state accepted")
+	}
+}
+
+func TestSignedManifestStateExpires(t *testing.T) {
+	const secret = "hub-token"
+	// Sign a payload that already expired, the way a link left overnight would be.
+	expired := base64.RawURLEncoding.EncodeToString([]byte("agent-race|" + strconv.FormatInt(time.Now().Add(-time.Minute).Unix(), 10)))
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte("elasticclaw:app-manifest:" + expired))
+	state := expired + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+
+	if _, ok := verifyManifestState(secret, state); ok {
+		t.Error("an expired state was accepted")
 	}
 }
