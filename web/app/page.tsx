@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/sidebar"
 import { ConversationView } from "@/components/conversation-view"
 import { SetupScreen } from "@/components/setup-screen"
 import { ManualTriggerModal } from "@/components/manual-trigger-modal"
+import { CodexConnectBanner } from "@/components/codex-connect-banner"
 import { useHub } from "@/hooks/use-hub"
 import type { Message } from "@/lib/types"
 import { isConfigured, type Workflow } from "@/lib/api"
@@ -259,6 +260,7 @@ export default function Home() {
         onSelectWorkflow={setSelectedWorkflow}
       />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <CodexConnectBanner />
         <ConversationView
           claw={selectedClaw}
           allClaws={claws}
