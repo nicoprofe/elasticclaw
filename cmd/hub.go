@@ -150,6 +150,31 @@ func runHub(cmd *cobra.Command, args []string) error {
 	if provClawToken == "" {
 		provClawToken = hubCfg.ClawToken
 	}
+
+	// A hub started with no configuration — which is what double-clicking the
+	// desktop app does — has neither token. Provisioning below requires both, so
+	// it would be skipped, leaving no tenant row in the database. Sign-in would
+	// then succeed (it compares against the config) while every tenant-scoped
+	// endpoint returned 401, bouncing the dashboard straight back to the login
+	// page a moment after it appeared. Generate what is missing and persist it, so
+	// the zero-configuration path provisions a usable tenant like any other.
+	if provToken == "" || provClawToken == "" {
+		if provToken == "" {
+			provToken = randomToken()
+			hubCfg.Token = provToken
+		}
+		if provClawToken == "" {
+			provClawToken = randomToken()
+			hubCfg.ClawToken = provClawToken
+		}
+		if err := config.SaveHubConfig(hubCfg); err != nil {
+			// The in-memory values still provision a working tenant for this run.
+			fmt.Printf("[hub] warning: generated tokens could not be saved (%v) — they will change on restart\n", err)
+		} else {
+			fmt.Println("[hub] generated missing tokens and saved them to hub.yaml")
+		}
+	}
+
 	if provToken != "" && provClawToken != "" {
 		if _, err := s.Provision(provToken, provClawToken); err != nil {
 			return fmt.Errorf("failed to provision tenant: %w", err)

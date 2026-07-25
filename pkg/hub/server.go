@@ -366,7 +366,6 @@ func (s *Server) run(ctx context.Context, opts ...RunOptions) error {
 	if s.hubCfg.UIPassword == "" {
 		log.Printf("⚠️  Web UI password not set — using default: 'admin'. Set ui_password in hub.yaml to secure the UI.")
 	}
-	s.ensureAPIToken()
 	err := srv.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
 		// ListenAndServe returns as soon as Shutdown starts. Wait for it to
@@ -691,37 +690,6 @@ func (s *Server) tenantByClawToken(token string) (string, error) {
 
 const webSessionHeader = "X-Elasticclaw-Session"
 
-// ensureAPIToken gives a hub that was started without configuration a real API
-// token, and persists it so it survives restarts.
-//
-// A hub started by double-clicking the binary has no hub.yaml to read a token
-// from. handleWebLogin hands the browser hubCfg.Token on success, so without one
-// the dashboard receives an empty credential and cannot call the API it just
-// signed in to. Generating one here keeps the zero-configuration path working
-// while remaining strictly more secure than shipping an empty token.
-func (s *Server) ensureAPIToken() {
-	s.mu.Lock()
-	if s.hubCfg.Token != "" {
-		s.mu.Unlock()
-		return
-	}
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		s.mu.Unlock()
-		log.Printf("⚠️  could not generate an API token: %v — sign-in will not return a usable token", err)
-		return
-	}
-	s.hubCfg.Token = hex.EncodeToString(buf)
-	cfgCopy := *s.hubCfg
-	s.mu.Unlock()
-
-	if err := config.SaveHubConfig(&cfgCopy); err != nil {
-		// The in-memory token still works for this run, so this is not fatal.
-		log.Printf("⚠️  generated an API token but could not save it: %v — it will change on restart", err)
-		return
-	}
-	log.Printf("[hub] generated an API token and saved it to hub.yaml")
-}
 
 func (s *Server) resolveUIPassword() string {
 	s.mu.RLock()
