@@ -233,6 +233,41 @@ func (s *Server) handleGitHubAppManifestStart(w http.ResponseWriter, r *http.Req
 	})
 }
 
+// handleGitHubAppManifestLaunch does what the Connect button should do: it opens
+// the user's browser on the setup page itself, instead of handing back a link to
+// copy. One click in the app, then GitHub.
+func (s *Server) handleGitHubAppManifestLaunch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	workspace := strings.TrimSpace(r.URL.Query().Get("workspace"))
+
+	ticket, err := randomManifestState()
+	if err != nil {
+		http.Error(w, "could not start GitHub setup", http.StatusInternalServerError)
+		return
+	}
+	s.manifestTickets.put(ticket, manifestState{Workspace: workspace, CreatedAt: time.Now()})
+
+	openURL := hubBaseURLFromRequest(r) + "/api/github/app-manifest/open?ticket=" + url.QueryEscape(ticket)
+
+	// Report whether the browser actually opened, so the UI can fall back to
+	// showing the link rather than claiming success it cannot verify.
+	opened := true
+	message := ""
+	if err := openInDefaultBrowser(openURL); err != nil {
+		opened = false
+		message = err.Error()
+	}
+	jsonOK(w, map[string]interface{}{
+		"opened":  opened,
+		"openUrl": openURL,
+		"appName": defaultAppName(workspace),
+		"error":   message,
+	})
+}
+
 // manifestOpenPage posts the manifest to GitHub on the user's behalf. It renders
 // a real button as well as auto-submitting, because a browser that blocks the
 // scripted submit would otherwise show a blank page.

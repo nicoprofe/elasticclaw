@@ -462,6 +462,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/github/app-manifest", s.withWebAdminAuth(s.handleGitHubAppManifestStart))
 	mux.HandleFunc("/api/github/app-manifest/callback", s.handleGitHubAppManifestCallback)
 	mux.HandleFunc("/api/github/app-manifest/open", s.handleGitHubAppManifestOpen)
+	mux.HandleFunc("/api/github/app-manifest/launch", s.withWebAdminAuth(s.handleGitHubAppManifestLaunch))
 	mux.HandleFunc("/api/github/repositories", s.withWebAdminAuth(s.handleGitHubInstallationRepositories))
 	mux.HandleFunc("/api/messages/", s.withAuth(s.handleMessages))
 	mux.HandleFunc("/api/files/", s.withAuth(s.handleFileUpload))

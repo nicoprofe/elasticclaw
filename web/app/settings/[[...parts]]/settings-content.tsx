@@ -1646,6 +1646,8 @@ function GitHubSection({ settings, onSave, saving, workspace }: { settings: Sett
   const [workspaceLoading, setWorkspaceLoading] = useState(true)
   const [workspaceError, setWorkspaceError] = useState("")
   const [connectUrl, setConnectUrl] = useState("")
+  const [connectStarted, setConnectStarted] = useState(false)
+  const [connectOpened, setConnectOpened] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [connectError, setConnectError] = useState("")
   const hubUrl = getHubUrl()
@@ -1660,13 +1662,17 @@ function GitHubSection({ settings, onSave, saving, workspace }: { settings: Sett
     setConnecting(true)
     try {
       const res = await fetch(
-        `${hubUrl}/api/github/app-manifest?workspace=${encodeURIComponent(workspace)}`,
+        `${hubUrl}/api/github/app-manifest/launch?workspace=${encodeURIComponent(workspace)}`,
         { method: "POST", headers: { Authorization: `Bearer ${token()}` } },
       )
       if (!res.ok) throw new Error(await res.text())
       const data = await res.json()
-      if (!data.openUrl) throw new Error("the server did not return a setup link")
-      setConnectUrl(data.openUrl)
+      setConnectOpened(!!data.opened)
+      // Only surface a link when the browser could not be opened; otherwise the
+      // user has nothing to copy and nothing to do but finish on GitHub.
+      setConnectUrl(data.opened ? "" : (data.openUrl || ""))
+      setConnectStarted(true)
+      if (!data.opened && data.error) setConnectError(data.error)
     } catch (e) {
       setConnectError(e instanceof Error ? e.message : "Could not start GitHub setup")
     } finally {
@@ -1953,10 +1959,10 @@ function GitHubSection({ settings, onSave, saving, workspace }: { settings: Sett
           {brandName} creates the App for you. You approve it on GitHub, then choose which
           repositories it can access — no App ID or private key to copy.
         </p>
-        {!connectUrl && (
+        {!connectStarted && (
           <Button onClick={startConnect} disabled={connecting || !workspace} className="mt-3 gap-2">
             <Github className="size-4" />
-            {connecting ? "Preparing…" : "Connect GitHub"}
+            {connecting ? "Opening GitHub…" : "Connect GitHub"}
           </Button>
         )}
         {!workspace && (
@@ -1964,24 +1970,33 @@ function GitHubSection({ settings, onSave, saving, workspace }: { settings: Sett
             Select or create a workspace first — a GitHub App is stored against one workspace.
           </p>
         )}
-        {connectUrl && (
+        {connectStarted && (
           <div className="mt-3 rounded-md border border-border bg-background p-3">
-            <p className="text-sm">Open this link to finish in your browser:</p>
-            <a
-              href={connectUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-1 block break-all font-mono text-sm font-medium text-primary underline underline-offset-4"
-            >
-              {connectUrl}
-            </a>
-            <p className="mt-2 text-sm text-muted-foreground">
-              GitHub will show the permissions before you approve. The link works once.
-            </p>
+            {connectOpened ? (
+              <>
+                <p className="text-sm font-medium">Finish in the browser window that just opened</p>
+                <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
+                  <li>Click <span className="text-foreground">Create GitHub App</span> — the name and permissions are already filled in.</li>
+                  <li>Choose <span className="text-foreground">Only select repositories</span>, pick your repo, and click <span className="text-foreground">Install</span>.</li>
+                </ol>
+              </>
+            ) : (
+              <>
+                <p className="text-sm">Could not open your browser. Open this link instead:</p>
+                <a
+                  href={connectUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 block break-all font-mono text-sm font-medium text-primary underline underline-offset-4"
+                >
+                  {connectUrl}
+                </a>
+              </>
+            )}
             <button
               type="button"
-              onClick={() => { setConnectUrl(""); void loadWorkspaceApps() }}
-              className="mt-2 text-sm text-muted-foreground underline-offset-4 hover:underline"
+              onClick={() => { setConnectStarted(false); setConnectUrl(""); void loadWorkspaceApps() }}
+              className="mt-3 text-sm text-muted-foreground underline-offset-4 hover:underline"
             >
               I have finished — refresh
             </button>
