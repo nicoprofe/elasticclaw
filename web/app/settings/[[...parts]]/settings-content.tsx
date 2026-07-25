@@ -1645,6 +1645,9 @@ function GitHubSection({ settings, onSave, saving, workspace }: { settings: Sett
   const [workspaceApps, setWorkspaceApps] = useState<WorkspaceGitHubAppView[]>([])
   const [workspaceLoading, setWorkspaceLoading] = useState(true)
   const [workspaceError, setWorkspaceError] = useState("")
+  const [pemDragging, setPemDragging] = useState(false)
+  const [pemFileName, setPemFileName] = useState("")
+  const [pemError, setPemError] = useState("")
   const [connectUrl, setConnectUrl] = useState("")
   const [connectStarted, setConnectStarted] = useState(false)
   const [connectOpened, setConnectOpened] = useState(false)
@@ -1683,6 +1686,26 @@ function GitHubSection({ settings, onSave, saving, workspace }: { settings: Sett
   const resetModal = () => {
     setAppName(""); setAppId(""); setUrl(""); setInstallation(""); setPem("")
     setTestResult(null); setTestError(""); setTesting(false)
+    setPemFileName(""); setPemError(""); setPemDragging(false)
+  }
+
+  // Load the .pem GitHub downloaded, rather than making the user open it in an
+  // editor and paste it. The key never leaves the browser: it goes straight into
+  // the field that was already going to carry it.
+  const loadPemFile = async (file: File | undefined | null) => {
+    setPemError("")
+    if (!file) return
+    if (file.size > 64 * 1024) {
+      setPemError("That file is too large to be a private key.")
+      return
+    }
+    const text = await file.text()
+    if (!text.includes("PRIVATE KEY")) {
+      setPemError(`${file.name} does not look like a private key — pick the .pem GitHub gave you.`)
+      return
+    }
+    setPem(text.trim())
+    setPemFileName(file.name)
   }
 
   const openModal = () => { resetModal(); setShowModal(true) }
@@ -1954,15 +1977,55 @@ function GitHubSection({ settings, onSave, saving, workspace }: { settings: Sett
           nobody has to visit developer settings or paste a PEM. The manual form
           below stays for anyone who already has an App. */}
       <div className="rounded-lg border border-border bg-muted/30 p-4">
-        <p className="text-sm font-medium">Connect GitHub</p>
+        <p className="text-sm font-medium">Create a new GitHub App</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          {brandName} creates the App for you. You approve it on GitHub, then choose which
-          repositories it can access — no App ID or private key to copy.
+          Opens GitHub with the name and permissions already filled in. If GitHub returns you
+          here after you approve it, the App ID and private key are saved automatically. If it
+          does not, create the App yourself using the settings below and add it manually.
         </p>
+        <details className="mt-3 text-sm">
+          <summary
+            className="cursor-pointer text-muted-foreground underline-offset-4 hover:underline"
+            title="The exact settings to use if you create the App on GitHub yourself"
+          >
+            What settings does the App need?
+          </summary>
+          <div className="mt-2 space-y-2 rounded-md border border-border bg-background p-3">
+            <p className="text-muted-foreground">
+              At <span className="font-mono text-foreground">github.com/settings/apps/new</span>:
+            </p>
+            <ul className="ml-4 list-disc space-y-1">
+              <li><span className="text-foreground">Homepage URL</span> — anything public, e.g. https://www.elasticclaw.ai</li>
+              <li>
+                <span className="text-foreground">Webhook → uncheck &ldquo;Active&rdquo;</span>
+                <span className="text-muted-foreground" title="GitHub rejects a webhook URL it cannot reach over the internet, and this hub runs on 127.0.0.1">
+                  {" "}— required, this hub is not reachable from GitHub
+                </span>
+              </li>
+              <li>
+                <span className="text-foreground">Repository permissions</span>:
+                <span className="font-mono"> Contents</span> read+write,
+                <span className="font-mono"> Pull requests</span> read+write,
+                <span className="font-mono"> Issues</span> read+write,
+                <span className="font-mono"> Checks</span> read,
+                <span className="font-mono"> Metadata</span> read
+              </li>
+              <li><span className="text-foreground">Where can this be installed</span> — only on your own account</li>
+            </ul>
+            <p className="text-muted-foreground">
+              Then open the App, <span className="text-foreground">Generate a private key</span>,
+              install it on the repositories you want, and add the App ID and that key below.
+            </p>
+            <p className="text-muted-foreground">
+              Issues and Checks are only needed for issue-triggered workflows and CI gating; without
+              them the rest still works.
+            </p>
+          </div>
+        </details>
         {!connectStarted && (
           <Button onClick={startConnect} disabled={connecting || !workspace} className="mt-3 gap-2">
             <Github className="size-4" />
-            {connecting ? "Opening GitHub…" : "Connect GitHub"}
+            {connecting ? "Opening GitHub…" : "Create on GitHub"}
           </Button>
         )}
         {!workspace && (
@@ -1975,6 +2038,10 @@ function GitHubSection({ settings, onSave, saving, workspace }: { settings: Sett
             {connectOpened ? (
               <>
                 <p className="text-sm font-medium">Finish in the browser window that just opened</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  You must be signed in to GitHub. If GitHub shows an error instead of the create
+                  form, use &ldquo;What settings does the App need?&rdquo; above and add the App manually.
+                </p>
                 <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
                   <li>Click <span className="text-foreground">Create GitHub App</span> — the name and permissions are already filled in.</li>
                   <li>Choose <span className="text-foreground">Only select repositories</span>, pick your repo, and click <span className="text-foreground">Install</span>.</li>
@@ -2006,7 +2073,7 @@ function GitHubSection({ settings, onSave, saving, workspace }: { settings: Sett
       </div>
 
       <Button onClick={openModal} variant="outline" className="gap-2">
-        <Github className="size-4" /> Add an existing App manually
+        <Github className="size-4" /> Add an App manually (App ID + private key)
       </Button>
 
       {/* Modal */}
@@ -2041,13 +2108,42 @@ function GitHubSection({ settings, onSave, saving, workspace }: { settings: Sett
                 )}
               </div>
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Private Key (PEM)</label>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <label className="block text-xs text-muted-foreground">Private Key (PEM)</label>
+                  <label
+                    className="cursor-pointer text-xs text-primary underline-offset-4 hover:underline"
+                    title="Load the .pem file GitHub downloaded when you generated the private key"
+                  >
+                    Choose .pem file…
+                    <input
+                      type="file"
+                      accept=".pem,application/x-pem-file,text/plain"
+                      className="hidden"
+                      onChange={e => { void loadPemFile(e.target.files?.[0]); e.target.value = "" }}
+                    />
+                  </label>
+                </div>
+                {/* Drop target as well as a picker: the file is sitting in Downloads,
+                    and opening it in an editor to copy it out is needless work. */}
                 <textarea
                   value={pem}
-                  onChange={e => setPem(e.target.value)}
-                  placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"
-                  className="w-full h-32 rounded-md border border-border bg-background px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                  onChange={e => { setPem(e.target.value); setPemFileName(""); setPemError("") }}
+                  onDragOver={e => { e.preventDefault(); setPemDragging(true) }}
+                  onDragLeave={() => setPemDragging(false)}
+                  onDrop={e => {
+                    e.preventDefault()
+                    setPemDragging(false)
+                    void loadPemFile(e.dataTransfer.files?.[0])
+                  }}
+                  placeholder="Drag the .pem file here, use “Choose .pem file…”, or paste the key"
+                  className={`w-full h-32 rounded-md border bg-background px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-ring ${pemDragging ? "border-primary ring-2 ring-ring" : "border-border"}`}
                 />
+                {pemFileName && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Loaded from <span className="text-foreground">{pemFileName}</span> — the key stays on this machine.
+                  </p>
+                )}
+                {pemError && <p className="mt-1 text-xs text-destructive">{pemError}</p>}
               </div>
 
               <div className="flex gap-2">
