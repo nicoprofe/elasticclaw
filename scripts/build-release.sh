@@ -81,13 +81,50 @@ build windows arm64 elasticclaw-windows-arm64.exe
 # It must be a separate binary from the CLI because -H=windowsgui drops the
 # console subsystem — required so double-clicking shows no console window, and
 # fatal for a command-line tool, which needs somewhere to print.
+
+# Embed the app icon and Windows version metadata. Without a .rsrc resource the
+# taskbar shows a blank default icon and the file's Properties pane has no
+# version or product name — it does not read as an installed application.
+# Best-effort: a missing goversioninfo must not fail a release, it just produces
+# an iconless binary.
+build_windows_resource() {
+  local syso="cmd/elasticclaw-desktop/resource_windows_amd64.syso"
+  rm -f "$syso"
+  if ! command -v goversioninfo >/dev/null 2>&1; then
+    GOFLAGS=-mod=mod go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest >/dev/null 2>&1 || true
+    export PATH="$PATH:$(go env GOPATH)/bin"
+  fi
+  if ! command -v goversioninfo >/dev/null 2>&1; then
+    echo "  ⚠ goversioninfo unavailable — building without an icon"
+    return 0
+  fi
+  # Windows version fields are four integers; derive them from the CalVer tag and
+  # fall back to zeros for anything non-numeric.
+  local nums
+  nums="$(printf '%s' "$VERSION" | tr -cd '0-9.' | tr '.' ' ')"
+  set -- $nums 0 0 0 0
+  python3 - "$1" "$2" "$3" "$4" "$VERSION" <<'PY'
+import json, sys
+maj, mnr, pat, bld, version = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
+tmpl = open("build/windows/versioninfo.json.tmpl").read().replace("__VERSION__", version)
+d = json.loads(tmpl)
+for k in ("FileVersion", "ProductVersion"):
+    d["FixedFileInfo"][k] = {"Major": maj, "Minor": mnr, "Patch": pat, "Build": bld}
+json.dump(d, open("build/windows/versioninfo.json", "w"), indent=2)
+PY
+  goversioninfo -o "$syso" -platform-specific=false -64 build/windows/versioninfo.json >/dev/null
+  echo "  ✓ icon and version metadata embedded"
+}
+
 build_desktop() {
   local goarch="$1" asset="$2"
   echo "→ ${asset}"
   CGO_ENABLED=0 GOOS=windows GOARCH="$goarch" \
-    go build -trimpath -tags embedweb -ldflags "$LDFLAGS -H=windowsgui" \
+    go build -trimpath -tags embedweb -ldflags "$LDFLAGS -H=windowsgui -X main.Version=${VERSION}" \
     -o "${OUTPUT_DIR}/${asset}" ./cmd/elasticclaw-desktop/
 }
+
+build_windows_resource
 
 build_desktop amd64 elasticclaw-desktop-windows-amd64.exe
 build_desktop arm64 elasticclaw-desktop-windows-arm64.exe

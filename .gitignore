@@ -46,3 +46,7 @@ bootopt
 # Docker dev environment (contains secrets — never commit)
 docker/hub.dev.yaml
 tmp/
+
+# Generated Windows icon/version resource (scripts/build-release.sh)
+cmd/elasticclaw-desktop/resource_windows_amd64.syso
+build/windows/versioninfo.json

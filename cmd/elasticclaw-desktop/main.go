@@ -24,7 +24,29 @@ import (
 	"github.com/jchv/go-webview2"
 )
 
+// Version is stamped at build time and shown in Add or Remove Programs.
+var Version = "dev"
+
 func main() {
+	// Installation runs before the log is redirected, so its output reaches a
+	// console when invoked from one.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--install", "/install":
+			if err := runInstall(); err != nil {
+				fatal("Install failed.\n\n" + err.Error())
+				os.Exit(1)
+			}
+			return
+		case "--uninstall", "/uninstall":
+			if err := runUninstall(); err != nil {
+				fatal("Uninstall failed.\n\n" + err.Error())
+				os.Exit(1)
+			}
+			return
+		}
+	}
+
 	// No console is attached, so anything written to stderr is lost. Send the
 	// server's log somewhere the user can actually read after the fact.
 	logPath, closeLog := openLog()
@@ -84,7 +106,10 @@ func openLog() (string, func()) {
 		_ = os.MkdirAll(dir, 0o700)
 	}
 	path := filepath.Join(dir, "desktop.log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	// Append rather than truncate: two instances share this path, and truncating
+	// let each one destroy the other's log — including the startup errors that are
+	// the whole reason the file exists.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return path, func() {}
 	}
