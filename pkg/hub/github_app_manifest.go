@@ -297,6 +297,7 @@ func (s *Server) handleGitHubAppManifestOpen(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "could not build the GitHub setup URL: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	log.Printf("[github] app-manifest: redirecting to GitHub to create an App for workspace %q", workspace)
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
@@ -332,18 +333,26 @@ func (s *Server) manifestCreateURL(r *http.Request, workspace, state string) (st
 func (s *Server) handleGitHubAppManifestCallback(w http.ResponseWriter, r *http.Request) {
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
 	state := strings.TrimSpace(r.URL.Query().Get("state"))
+	// Log every arrival. A silently rejected callback is indistinguishable from one
+	// that never happened, which made a failing setup impossible to diagnose: the
+	// App existed on GitHub while the hub had no record and no explanation.
+	log.Printf("[github] app-manifest callback: code=%t state=%t", code != "", state != "")
 	if code == "" || state == "" {
+		log.Printf("[github] app-manifest callback rejected: missing code or state")
 		http.Error(w, "missing code or state", http.StatusBadRequest)
 		return
 	}
 	workspace, ok := verifyManifestState(s.webSessionSecret(), state)
 	if !ok {
+		log.Printf("[github] app-manifest callback rejected: state did not verify (expired, or issued by a different hub)")
 		http.Error(w, "this GitHub setup link is no longer valid — start again from the app", http.StatusBadRequest)
 		return
 	}
+	log.Printf("[github] app-manifest callback accepted for workspace %q", workspace)
 
 	app, err := convertGitHubAppManifest(r.Context(), code)
 	if err != nil {
+		log.Printf("[github] app-manifest conversion failed: %v", err)
 		http.Error(w, "GitHub setup failed: "+err.Error(), http.StatusBadGateway)
 		return
 	}
