@@ -74,6 +74,7 @@ jobs:
             elasticclaw-linux-amd64 elasticclaw-linux-arm64 \
             elasticclaw-darwin-amd64 elasticclaw-darwin-arm64 \
             elasticclaw-windows-amd64.exe elasticclaw-windows-arm64.exe \
+            ElasticClaw-windows-amd64.exe ElasticClaw-windows-arm64.exe \
             claw-bridge-linux-amd64 checksums.txt; do
             if [[ ! -f "$asset" ]]; then
               echo "::error::missing release asset: $asset"
