@@ -732,6 +732,34 @@ func (s *Server) resolveUIPassword() string {
 	return "admin"
 }
 
+// signInCredentials returns the UI password and API token that sign-in should
+// accept, preferring what is currently on disk over what was loaded at startup.
+//
+// hub.yaml is otherwise read once, at startup, so setting or changing
+// ui_password or token in it had no effect until the hub was restarted: the new
+// credential was rejected as invalid with nothing to indicate why. Editing the
+// config is the documented way to set these, so reading it here makes the edit
+// take effect immediately. Sign-in is infrequent, so the read costs nothing that
+// matters, and a failure falls back to the values already in memory.
+func (s *Server) signInCredentials() (uiPassword, apiToken string) {
+	s.mu.RLock()
+	uiPassword, apiToken = s.hubCfg.UIPassword, s.hubCfg.Token
+	s.mu.RUnlock()
+
+	if onDisk, err := config.LoadHubConfig(); err == nil && onDisk != nil {
+		if onDisk.UIPassword != "" {
+			uiPassword = onDisk.UIPassword
+		}
+		if onDisk.Token != "" {
+			apiToken = onDisk.Token
+		}
+	}
+	if uiPassword == "" {
+		uiPassword = "admin"
+	}
+	return uiPassword, apiToken
+}
+
 func (s *Server) withWebAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -841,17 +869,18 @@ func (s *Server) handleWebLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	s.mu.RLock()
-	hubToken := s.hubCfg.Token
-	s.mu.RUnlock()
+	// Read from disk so a credential just written to hub.yaml works without a
+	// restart. See signInCredentials.
+	uiPassword, hubToken := s.signInCredentials()
 
 	// The sign-in field is labelled "Access token", so accept the hub API token
 	// as well as the UI password — otherwise pasting the token the field asks for
 	// is rejected. Compared in constant time: both are credentials, and a
 	// byte-by-byte comparison leaks how much of a guess was correct.
-	okPassword := subtle.ConstantTimeCompare([]byte(body.Password), []byte(s.resolveUIPassword())) == 1
+	okPassword := subtle.ConstantTimeCompare([]byte(body.Password), []byte(uiPassword)) == 1
 	okToken := hubToken != "" && subtle.ConstantTimeCompare([]byte(body.Password), []byte(hubToken)) == 1
 	if !okPassword && !okToken {
+		log.Printf("[auth] sign-in rejected: %d-character credential did not match ui_password or token", len(body.Password))
 		http.Error(w, "invalid password", http.StatusUnauthorized)
 		return
 	}
