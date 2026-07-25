@@ -74,7 +74,7 @@ jobs:
             elasticclaw-linux-amd64 elasticclaw-linux-arm64 \
             elasticclaw-darwin-amd64 elasticclaw-darwin-arm64 \
             elasticclaw-windows-amd64.exe elasticclaw-windows-arm64.exe \
-            ElasticClaw-windows-amd64.exe ElasticClaw-windows-arm64.exe \
+            elasticclaw-desktop-windows-amd64.exe elasticclaw-desktop-windows-arm64.exe \
             claw-bridge-linux-amd64 checksums.txt; do
             if [[ ! -f "$asset" ]]; then
               echo "::error::missing release asset: $asset"
@@ -84,6 +84,13 @@ jobs:
               missing=1
             fi
           done
+          # GitHub asset names are case-insensitive for uniqueness, so two assets
+          # differing only in case fail at upload after the whole build has run.
+          dupes="$(ls | tr 'A-Z' 'a-z' | sort | uniq -d)"
+          if [[ -n "$dupes" ]]; then
+            echo "::error::asset names collide case-insensitively: $dupes"
+            missing=1
+          fi
           # The Linux binary runs on this runner: confirm it reports the tag it
           # was built from rather than a stale or empty version string.
           reported="$(./elasticclaw-linux-amd64 version)"

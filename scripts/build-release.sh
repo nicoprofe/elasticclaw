@@ -76,6 +76,8 @@ build windows amd64 elasticclaw-windows-amd64.exe
 build windows arm64 elasticclaw-windows-arm64.exe
 
 # The native Windows desktop app: a Win32 window hosting WebView2, no browser.
+# Names must differ from the CLI by more than case: GitHub release asset names are
+# case-insensitive for uniqueness, so "ElasticClaw-..." collided with "elasticclaw-...".
 # It must be a separate binary from the CLI because -H=windowsgui drops the
 # console subsystem — required so double-clicking shows no console window, and
 # fatal for a command-line tool, which needs somewhere to print.
@@ -87,8 +89,8 @@ build_desktop() {
     -o "${OUTPUT_DIR}/${asset}" ./cmd/elasticclaw-desktop/
 }
 
-build_desktop amd64 ElasticClaw-windows-amd64.exe
-build_desktop arm64 ElasticClaw-windows-arm64.exe
+build_desktop amd64 elasticclaw-desktop-windows-amd64.exe
+build_desktop arm64 elasticclaw-desktop-windows-arm64.exe
 
 # claw-bridge runs inside sandboxes (always linux/amd64) and is downloaded by
 # the hub at run time — it must ship in the same release as the hub binary.
