@@ -97,6 +97,7 @@ type Server struct {
 	fireworksModelsCacheUntil time.Time
 	modelAuthJobsMu           sync.Mutex
 	modelAuthJobs             map[string]*modelAuthLoginJob
+	manifestStates            manifestStateStore
 	modelAuthRefreshMu        sync.Mutex
 	modelAuthPending          map[string]string // rotated auth state awaiting durable config persistence
 	grokTokenEndpoint         string            // test seam; defaults to the xAI OAuth token endpoint
@@ -452,6 +453,14 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/volumes/leases/{lease}/archive", s.handleVolumeArchive)
 	mux.HandleFunc("/api/terminal/", s.handleTerminal)
 	mux.HandleFunc("/api/github/token/", s.handleGitHubToken) // credential helper endpoint (claw-token auth)
+
+	// GitHub App manifest flow. The start endpoint is admin-only, but the callback
+	// cannot be: GitHub redirects the user's browser to it with no way to attach a
+	// bearer token, so the single-use state issued by the start endpoint is what
+	// authorizes it.
+	mux.HandleFunc("/api/github/app-manifest", s.withWebAdminAuth(s.handleGitHubAppManifestStart))
+	mux.HandleFunc("/api/github/app-manifest/callback", s.handleGitHubAppManifestCallback)
+	mux.HandleFunc("/api/github/repositories", s.withWebAdminAuth(s.handleGitHubInstallationRepositories))
 	mux.HandleFunc("/api/messages/", s.withAuth(s.handleMessages))
 	mux.HandleFunc("/api/files/", s.withAuth(s.handleFileUpload))
 	mux.HandleFunc("/api/files/view/", s.withAuth(s.handleFileView))
