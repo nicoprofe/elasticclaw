@@ -1,8 +1,10 @@
 package hub
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	neturl "net/url"
 	"strings"
 	"testing"
 	"time"
@@ -172,15 +174,41 @@ func TestManifestHomepageIsPublicButRedirectIsLocal(t *testing.T) {
 	}
 }
 
-// The open page must not auto-submit. Submitting while signed out routes the POST
-// through GitHub's login redirect, which drops the body — GitHub then reports
-// `"url" wasn't supplied` even though the manifest was complete. The interstitial
-// exists precisely so the user can sign in before the form is posted.
-func TestManifestOpenPageDoesNotAutoSubmit(t *testing.T) {
-	if strings.Contains(manifestOpenPage, "submit()") {
-		t.Fatal("open page auto-submits — a signed-out user loses the manifest to the login redirect")
+// The handoff must be a GET navigation, not a form POST. Browsers withhold
+// SameSite=Lax cookies on cross-site POSTs, so a POST from the local hub reached
+// GitHub with no session: it ignored the manifest and reported `"url" wasn't
+// supplied` while the user was signed in in another tab.
+func TestManifestHandoffIsAGetWithTheManifestInTheQuery(t *testing.T) {
+	srv := &Server{}
+	r := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/api/github/app-manifest/open", nil)
+
+	target, err := srv.manifestCreateURL(r, "agent-race", "state-123")
+	if err != nil {
+		t.Fatalf("manifestCreateURL: %v", err)
 	}
-	if !strings.Contains(manifestOpenPage, "signed in to GitHub") {
-		t.Error("open page should tell the user to sign in before continuing")
+	parsed, err := neturl.Parse(target)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if parsed.Host != "github.com" || parsed.Path != "/settings/apps/new" {
+		t.Errorf("target = %s, want github.com/settings/apps/new", target)
+	}
+	if parsed.Query().Get("state") != "state-123" {
+		t.Error("state must survive into the redirect, or the callback cannot be matched")
+	}
+
+	raw := parsed.Query().Get("manifest")
+	if raw == "" {
+		t.Fatal("manifest is missing from the query string")
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		t.Fatalf("manifest is not valid JSON in the query: %v", err)
+	}
+	if m["name"] != "ElasticClaw agent-race" {
+		t.Errorf("manifest name = %v", m["name"])
+	}
+	if u, _ := m["url"].(string); !strings.HasPrefix(u, "https://") {
+		t.Errorf("homepage url %q must be public", u)
 	}
 }

@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"io"
 	"log"
 	"net/http"
@@ -358,29 +357,38 @@ func (s *Server) handleGitHubAppManifestOpen(w http.ResponseWriter, r *http.Requ
 	}
 	s.manifestStates.put(state, manifestState{Workspace: pending.Workspace, CreatedAt: time.Now()})
 
+	target, err := s.manifestCreateURL(r, pending.Workspace, state)
+	if err != nil {
+		http.Error(w, "could not build the GitHub setup URL: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// manifestCreateURL builds GitHub's app-creation URL with the manifest in the
+// query string.
+//
+// The hub used to serve a page that POSTed the manifest as a form, which is what
+// GitHub's documentation shows. But a POST from 127.0.0.1 to github.com is
+// cross-site, and browsers withhold SameSite=Lax cookies on cross-site POSTs — so
+// GitHub received an anonymous request, ignored the manifest, and reported
+// `"url" wasn't supplied` while the user was signed in in another tab of the same
+// browser. A top-level GET navigation does carry Lax cookies, so a redirect keeps
+// the session and GitHub actually reads the manifest.
+func (s *Server) manifestCreateURL(r *http.Request, workspace, state string) (string, error) {
 	base := hubBaseURLFromRequest(r)
-	webhookURL, webhookActive := manifestWebhook(base, pending.Workspace, r.Host)
-	appName := defaultAppName(pending.Workspace)
-	manifest := buildGitHubAppManifest(appName, appHomepageURL(), base+"/api/github/app-manifest/callback", webhookURL, webhookActive)
+	webhookURL, webhookActive := manifestWebhook(base, workspace, r.Host)
+	manifest := buildGitHubAppManifest(defaultAppName(workspace), appHomepageURL(),
+		base+"/api/github/app-manifest/callback", webhookURL, webhookActive)
+
 	manifestJSON, err := json.Marshal(manifest)
 	if err != nil {
-		http.Error(w, "could not build the manifest", http.StatusInternalServerError)
-		return
+		return "", err
 	}
-
-	tmpl, err := template.New("manifest").Parse(manifestOpenPage)
-	if err != nil {
-		http.Error(w, "could not render the page", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	// The manifest is escaped as an HTML attribute by html/template, so the JSON
-	// cannot break out of the value and inject markup.
-	_ = tmpl.Execute(w, map[string]interface{}{
-		"AppName":  appName,
-		"Action":   "https://github.com/settings/apps/new?state=" + url.QueryEscape(state),
-		"Manifest": string(manifestJSON),
-	})
+	q := url.Values{}
+	q.Set("state", state)
+	q.Set("manifest", string(manifestJSON))
+	return "https://github.com/settings/apps/new?" + q.Encode(), nil
 }
 
 // handleGitHubAppManifestCallback completes the flow. GitHub redirects the
