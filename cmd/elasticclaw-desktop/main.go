@@ -47,6 +47,13 @@ func main() {
 		}
 	}
 
+	// Started with no arguments from outside the install directory — a
+	// double-click on a freshly downloaded exe. Offer to install first, so the app
+	// ends up in the Start menu instead of only ever running from Downloads.
+	if len(os.Args) == 1 && maybeOfferInstall() {
+		return // the installed copy is now running in our place
+	}
+
 	// No console is attached, so anything written to stderr is lost. Send the
 	// server's log somewhere the user can actually read after the fact.
 	logPath, closeLog := openLog()

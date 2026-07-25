@@ -31,6 +31,60 @@ const (
 	uninstallKey = `Software\Microsoft\Windows\CurrentVersion\Uninstall\ElasticClaw`
 )
 
+// maybeOfferInstall runs when the app is started with no arguments — which is
+// what double-clicking does — from somewhere other than its install directory,
+// typically the Downloads folder.
+//
+// Without this, downloading the exe and double-clicking it only ever launches the
+// app: --install is a flag, and a double-click passes no flags, so the install
+// path was unreachable for anyone who did not open a terminal. The app would run
+// but never actually be installed.
+//
+// Returns true when the caller should exit because the installed copy was
+// launched in its place.
+func maybeOfferInstall() bool {
+	self, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	self, _ = filepath.EvalSymlinks(self)
+
+	dir, err := installDir()
+	if err != nil {
+		return false
+	}
+	// Already running from the install directory: nothing to do.
+	if strings.HasPrefix(strings.ToLower(self), strings.ToLower(dir)) {
+		return false
+	}
+
+	if !askYesNo("Install ElasticClaw",
+		"Install ElasticClaw for your user account?\n\n"+
+			"It will be added to your Start menu and Desktop, and listed in Add or Remove "+
+			"Programs so you can uninstall it later. No administrator rights are needed.\n\n"+
+			"Choose No to just run it this once without installing.") {
+		return false
+	}
+
+	if err := runInstall(); err != nil {
+		// Installing is a convenience; a failure should not stop the app running.
+		fmt.Fprintf(os.Stderr, "install failed: %v\n", err)
+		messageBox("ElasticClaw", "Could not install:\n\n"+err.Error()+
+			"\n\nElasticClaw will run from its current location instead.")
+		return false
+	}
+
+	// Hand over to the installed copy, so the running process is the one the
+	// Start menu shortcut and the uninstaller point at.
+	target := filepath.Join(dir, appExeName)
+	cmd := exec.Command(target)
+	if err := cmd.Start(); err != nil {
+		// Installed, but could not hand over: keep running from here.
+		return false
+	}
+	return true
+}
+
 func installDir() (string, error) {
 	base := os.Getenv("LOCALAPPDATA")
 	if base == "" {
