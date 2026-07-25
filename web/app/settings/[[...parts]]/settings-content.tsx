@@ -1645,8 +1645,34 @@ function GitHubSection({ settings, onSave, saving, workspace }: { settings: Sett
   const [workspaceApps, setWorkspaceApps] = useState<WorkspaceGitHubAppView[]>([])
   const [workspaceLoading, setWorkspaceLoading] = useState(true)
   const [workspaceError, setWorkspaceError] = useState("")
+  const [connectUrl, setConnectUrl] = useState("")
+  const [connecting, setConnecting] = useState(false)
+  const [connectError, setConnectError] = useState("")
   const hubUrl = getHubUrl()
   const token = () => getAuthToken() || ""
+
+  // Ask the hub for a one-time link that posts the App manifest to GitHub. The
+  // link is opened in the user's own browser rather than submitted here, because
+  // GitHub requires a POST and signing in to GitHub inside the desktop app's
+  // WebView is worth avoiding.
+  const startConnect = async () => {
+    setConnectError("")
+    setConnecting(true)
+    try {
+      const res = await fetch(
+        `${hubUrl}/api/github/app-manifest?workspace=${encodeURIComponent(workspace)}`,
+        { method: "POST", headers: { Authorization: `Bearer ${token()}` } },
+      )
+      if (!res.ok) throw new Error(await res.text())
+      const data = await res.json()
+      if (!data.openUrl) throw new Error("the server did not return a setup link")
+      setConnectUrl(data.openUrl)
+    } catch (e) {
+      setConnectError(e instanceof Error ? e.message : "Could not start GitHub setup")
+    } finally {
+      setConnecting(false)
+    }
+  }
 
   const resetModal = () => {
     setAppName(""); setAppId(""); setUrl(""); setInstallation(""); setPem("")
@@ -1917,8 +1943,55 @@ function GitHubSection({ settings, onSave, saving, workspace }: { settings: Sett
         </div>
       )}
 
-      <Button onClick={openModal} className="gap-2">
-        <Github className="size-4" /> Add GitHub App
+      {/* One-click registration via GitHub's App manifest flow. GitHub creates the
+          App under the user's own account and returns its id and private key, so
+          nobody has to visit developer settings or paste a PEM. The manual form
+          below stays for anyone who already has an App. */}
+      <div className="rounded-lg border border-border bg-muted/30 p-4">
+        <p className="text-sm font-medium">Connect GitHub</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {brandName} creates the App for you. You approve it on GitHub, then choose which
+          repositories it can access — no App ID or private key to copy.
+        </p>
+        {!connectUrl && (
+          <Button onClick={startConnect} disabled={connecting || !workspace} className="mt-3 gap-2">
+            <Github className="size-4" />
+            {connecting ? "Preparing…" : "Connect GitHub"}
+          </Button>
+        )}
+        {!workspace && (
+          <p className="mt-2 text-sm text-muted-foreground">
+            Select or create a workspace first — a GitHub App is stored against one workspace.
+          </p>
+        )}
+        {connectUrl && (
+          <div className="mt-3 rounded-md border border-border bg-background p-3">
+            <p className="text-sm">Open this link to finish in your browser:</p>
+            <a
+              href={connectUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 block break-all font-mono text-sm font-medium text-primary underline underline-offset-4"
+            >
+              {connectUrl}
+            </a>
+            <p className="mt-2 text-sm text-muted-foreground">
+              GitHub will show the permissions before you approve. The link works once.
+            </p>
+            <button
+              type="button"
+              onClick={() => { setConnectUrl(""); void loadWorkspaceApps() }}
+              className="mt-2 text-sm text-muted-foreground underline-offset-4 hover:underline"
+            >
+              I have finished — refresh
+            </button>
+          </div>
+        )}
+        {connectError && <p className="mt-2 text-sm text-destructive">{connectError}</p>}
+      </div>
+
+      <Button onClick={openModal} variant="outline" className="gap-2">
+        <Github className="size-4" /> Add an existing App manually
       </Button>
 
       {/* Modal */}

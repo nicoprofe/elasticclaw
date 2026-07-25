@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"log"
 	"net/http"
@@ -193,10 +194,100 @@ func (s *Server) handleGitHubAppManifestStart(w http.ResponseWriter, r *http.Req
 		target = fmt.Sprintf("https://github.com/organizations/%s/settings/apps/new", url.PathEscape(org))
 	}
 
+	// GitHub needs the manifest as a POST body, which a link cannot do, and the
+	// desktop app is a WebView window where signing in to GitHub is a bad idea.
+	// So hand back a URL the user opens in their own browser: the hub serves a
+	// page there that posts the manifest for them.
+	//
+	// That page cannot require a bearer token, so it is gated by a single-use
+	// ticket. Without one, anyone who could reach the hub could start a flow and
+	// have the hub store an App created under *their* GitHub account, which would
+	// hand them control of the tokens the hub mints.
+	ticket, err := randomManifestState()
+	if err != nil {
+		http.Error(w, "could not start GitHub setup", http.StatusInternalServerError)
+		return
+	}
+	s.manifestTickets.put(ticket, manifestState{Workspace: workspace, CreatedAt: time.Now()})
+
 	jsonOK(w, map[string]interface{}{
+		"openUrl":  base + "/api/github/app-manifest/open?ticket=" + url.QueryEscape(ticket),
 		"url":      target + "?state=" + url.QueryEscape(state),
 		"manifest": manifest,
 		"state":    state,
+	})
+}
+
+// manifestOpenPage posts the manifest to GitHub on the user's behalf. It renders
+// a real button as well as auto-submitting, because a browser that blocks the
+// scripted submit would otherwise show a blank page.
+const manifestOpenPage = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Connect GitHub</title>
+<style>
+ body{background:#09090b;color:#fafafa;font:15px/1.6 system-ui,sans-serif;display:flex;
+      min-height:100vh;align-items:center;justify-content:center;margin:0}
+ .card{max-width:34rem;padding:2rem;text-align:center}
+ h1{font-size:1.25rem;margin:0 0 .75rem}
+ p{color:#a1a1aa;margin:0 0 1.5rem}
+ button{background:#67e8f9;color:#09090b;border:0;border-radius:.5rem;
+        padding:.75rem 1.5rem;font-size:15px;font-weight:600;cursor:pointer}
+</style></head>
+<body><div class="card">
+ <h1>Creating your GitHub App</h1>
+ <p>GitHub will ask you to approve an app called <strong>{{.AppName}}</strong>. It is created
+    under your own account, and you choose which repositories it can touch on the next screen.</p>
+ <form id="f" method="post" action="{{.Action}}">
+   <input type="hidden" name="manifest" value="{{.Manifest}}">
+   <button type="submit">Continue to GitHub</button>
+ </form>
+ <script>document.getElementById('f').submit()</script>
+</div></body></html>`
+
+// handleGitHubAppManifestOpen serves the auto-submitting page for a valid ticket.
+func (s *Server) handleGitHubAppManifestOpen(w http.ResponseWriter, r *http.Request) {
+	ticket := strings.TrimSpace(r.URL.Query().Get("ticket"))
+	if ticket == "" {
+		http.Error(w, "missing ticket", http.StatusBadRequest)
+		return
+	}
+	pending, ok := s.manifestTickets.take(ticket)
+	if !ok {
+		http.Error(w, "this GitHub setup link has already been used or expired — start again from the app", http.StatusBadRequest)
+		return
+	}
+
+	state, err := randomManifestState()
+	if err != nil {
+		http.Error(w, "could not start GitHub setup", http.StatusInternalServerError)
+		return
+	}
+	s.manifestStates.put(state, manifestState{Workspace: pending.Workspace, CreatedAt: time.Now()})
+
+	base := hubBaseURLFromRequest(r)
+	webhookURL := ""
+	if pending.Workspace != "" && !isLoopbackHost(r.Host) {
+		webhookURL = fmt.Sprintf("%s/api/workspaces/%s/webhooks/github", base, url.PathEscape(pending.Workspace))
+	}
+	appName := "ElasticClaw"
+	manifest := buildGitHubAppManifest(appName, base, base+"/api/github/app-manifest/callback", webhookURL)
+	manifestJSON, err := json.Marshal(manifest)
+	if err != nil {
+		http.Error(w, "could not build the manifest", http.StatusInternalServerError)
+		return
+	}
+
+	tmpl, err := template.New("manifest").Parse(manifestOpenPage)
+	if err != nil {
+		http.Error(w, "could not render the page", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// The manifest is escaped as an HTML attribute by html/template, so the JSON
+	// cannot break out of the value and inject markup.
+	_ = tmpl.Execute(w, map[string]interface{}{
+		"AppName":  appName,
+		"Action":   "https://github.com/settings/apps/new?state=" + url.QueryEscape(state),
+		"Manifest": string(manifestJSON),
 	})
 }
 

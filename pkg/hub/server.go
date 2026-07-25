@@ -98,6 +98,7 @@ type Server struct {
 	modelAuthJobsMu           sync.Mutex
 	modelAuthJobs             map[string]*modelAuthLoginJob
 	manifestStates            manifestStateStore
+	manifestTickets           manifestStateStore
 	modelAuthRefreshMu        sync.Mutex
 	modelAuthPending          map[string]string // rotated auth state awaiting durable config persistence
 	grokTokenEndpoint         string            // test seam; defaults to the xAI OAuth token endpoint
@@ -460,6 +461,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// authorizes it.
 	mux.HandleFunc("/api/github/app-manifest", s.withWebAdminAuth(s.handleGitHubAppManifestStart))
 	mux.HandleFunc("/api/github/app-manifest/callback", s.handleGitHubAppManifestCallback)
+	mux.HandleFunc("/api/github/app-manifest/open", s.handleGitHubAppManifestOpen)
 	mux.HandleFunc("/api/github/repositories", s.withWebAdminAuth(s.handleGitHubInstallationRepositories))
 	mux.HandleFunc("/api/messages/", s.withAuth(s.handleMessages))
 	mux.HandleFunc("/api/files/", s.withAuth(s.handleFileUpload))
