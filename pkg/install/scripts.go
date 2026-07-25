@@ -3,7 +3,11 @@
 // All functions are side-effect free and easily testable.
 package install
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/elasticclaw/elasticclaw/pkg/release"
+)
 
 // Params holds all inputs needed to generate install scripts.
 type Params struct {
@@ -15,11 +19,14 @@ type Params struct {
 }
 
 // HubBinaryURL returns the GitHub releases download URL for the hub binary.
+// The hub is always linux/amd64 regardless of the client's platform.
 func HubBinaryURL(version string) string {
-	return fmt.Sprintf(
-		"https://github.com/elasticclaw/elasticclaw/releases/download/%s/elasticclaw-linux-amd64",
-		version,
-	)
+	url, err := release.DownloadURL(version, "linux", "amd64")
+	if err != nil {
+		// linux/amd64 is always a supported target; this cannot happen.
+		panic(err)
+	}
+	return url
 }
 
 // HubConfig returns the hub.yaml config file content.

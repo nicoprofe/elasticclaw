@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/elasticclaw/elasticclaw/pkg/install"
+	"github.com/elasticclaw/elasticclaw/pkg/release"
 	"github.com/spf13/cobra"
 	gossh "golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -84,7 +85,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	if shouldFetchLatest {
 		fmt.Print("Fetching latest release... ")
 		var err error
-		version, err = latestGitHubRelease("elasticclaw", "elasticclaw")
+		relOwner, relRepo := release.Repo()
+		version, err = latestGitHubRelease(relOwner, relRepo)
 		if err != nil {
 			return fmt.Errorf("could not determine latest version: %w\nUse --version to specify explicitly", err)
 		}

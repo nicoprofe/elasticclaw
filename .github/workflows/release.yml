@@ -1,0 +1,108 @@
+name: Release
+
+# Publishes cross-platform binaries plus checksums.txt for a tag.
+#
+# The artifact names and the checksum manifest are what `elasticclaw upgrade`
+# fetches, so this workflow is the update channel: pushing a tag is what makes a
+# new version reachable by every installed client.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Prerelease tracks are supported — v0.2.0-beta.1 only upgrades beta clients.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and release (must already exist)"
+        required: true
+
+permissions:
+  contents: write # required to create the release and upload assets
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0 # build script uses git describe
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Verify the tree builds and tests pass
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Build release artifacts
+        env:
+          VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+          # Bake this repository in as the self-update source, so a fork's
+          # binaries upgrade from the fork rather than from upstream.
+          RELEASE_REPO: ${{ github.repository }}
+        run: scripts/build-release.sh
+
+      - name: Verify the updater's asset contract holds
+        # A renamed or missing artifact would leave installed clients unable to
+        # upgrade, and the failure would only surface on user machines. Assert
+        # the names here instead.
+        env:
+          VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          cd dist
+          missing=0
+          for asset in \
+            elasticclaw-linux-amd64 elasticclaw-linux-arm64 \
+            elasticclaw-darwin-amd64 elasticclaw-darwin-arm64 \
+            elasticclaw-windows-amd64.exe elasticclaw-windows-arm64.exe \
+            claw-bridge-linux-amd64 checksums.txt; do
+            if [[ ! -f "$asset" ]]; then
+              echo "::error::missing release asset: $asset"
+              missing=1
+            elif [[ "$asset" != checksums.txt ]] && ! grep -q " $asset\$" checksums.txt; then
+              echo "::error::asset not listed in checksums.txt: $asset"
+              missing=1
+            fi
+          done
+          # The Linux binary runs on this runner: confirm it reports the tag it
+          # was built from rather than a stale or empty version string.
+          reported="$(./elasticclaw-linux-amd64 version)"
+          echo "built: $reported"
+          if [[ "$reported" != *"$VERSION"* ]]; then
+            echo "::error::binary reports '$reported', expected version $VERSION"
+            missing=1
+          fi
+          exit $missing
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          notes_flag=(--generate-notes)
+          # Tags like v1.2.0-beta.1 publish as prereleases so stable clients,
+          # which only upgrade within their own track, are unaffected.
+          prerelease_flag=()
+          if [[ "$TAG" == *-* ]]; then
+            prerelease_flag=(--prerelease)
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --title "$TAG" "${notes_flag[@]}" "${prerelease_flag[@]}"
+          fi

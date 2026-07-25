@@ -39,6 +39,7 @@ import (
 	daytona "github.com/elasticclaw/elasticclaw/pkg/provider/daytona"
 	exedevProvider "github.com/elasticclaw/elasticclaw/pkg/provider/exedev"
 	replicatedpkg "github.com/elasticclaw/elasticclaw/pkg/provider/replicated"
+	"github.com/elasticclaw/elasticclaw/pkg/release"
 	"github.com/elasticclaw/elasticclaw/pkg/types"
 	"github.com/google/uuid"
 	gossh "golang.org/x/crypto/ssh"
@@ -5484,8 +5485,6 @@ func (s *Server) syncReplicatedVMs() {
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
-const githubReleasesBase = "https://github.com/elasticclaw/elasticclaw/releases/download"
-
 // Version is set by cmd at startup so the hub can construct versioned download URLs.
 var Version = "dev"
 
@@ -5500,7 +5499,7 @@ func (s *Server) bridgeDownloadURL() string {
 	if Version == "dev" || Version == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s/%s/claw-bridge-linux-amd64", githubReleasesBase, Version)
+	return release.BridgeDownloadURL(Version)
 }
 
 const (

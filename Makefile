@@ -1,9 +1,13 @@
-.PHONY: build build-bridge build-bridge-linux test test-bootstrap test-container e2e e2e-github e2e-linear e2e-jira e2e-replicated-github e2e-replicated-linear e2e-replicated-jira e2e-docker e2e-run clean install lint tidy clawpatch-init clawpatch-review clawpatch-report clawpatch-show clawpatch-triage clawpatch-pr dev dev-up dev-up-d dev-down dev-reset dev-logs dev-restart dev-sh-hub dev-sh-web dev-agent-build dev-claw _dev-config-check
+.PHONY: build build-release dist dist-windows build-bridge build-bridge-linux test test-bootstrap test-container e2e e2e-github e2e-linear e2e-jira e2e-replicated-github e2e-replicated-linear e2e-replicated-jira e2e-docker e2e-run clean install lint tidy clawpatch-init clawpatch-review clawpatch-report clawpatch-show clawpatch-triage clawpatch-pr dev dev-up dev-up-d dev-down dev-reset dev-logs dev-restart dev-sh-hub dev-sh-web dev-agent-build dev-claw _dev-config-check
 
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+PKG := github.com/elasticclaw/elasticclaw
+# Repository that serves release artifacts, baked into binaries as the
+# self-update source. Override when releasing from a fork.
+RELEASE_REPO ?= elasticclaw/elasticclaw
 
 LDFLAGS := -ldflags "-X github.com/elasticclaw/elasticclaw/cmd.Version=$(VERSION) \
 	-X github.com/elasticclaw/elasticclaw/cmd.Commit=$(COMMIT) \
@@ -30,6 +34,19 @@ build-web:
 build-release: build-web
 	mkdir -p bin
 	go build $(LDFLAGS) -tags embedweb -o bin/elasticclaw .
+
+# Cross-platform release artifacts in dist/, matching what CI publishes for a tag.
+# RELEASE_REPO is baked in as the self-update source.
+dist:
+	VERSION=$(VERSION) RELEASE_REPO=$(RELEASE_REPO) scripts/build-release.sh
+
+# Windows-only artifact, reusing an existing web build for a fast turnaround.
+dist-windows: build-web
+	mkdir -p dist
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -tags embedweb \
+		-ldflags "-s -w -X $(PKG)/cmd.Version=$(VERSION) -X $(PKG)/cmd.Commit=$(COMMIT) \
+		-X $(PKG)/cmd.BuildDate=$(BUILD_DATE) -X $(PKG)/pkg/release.DefaultRepo=$(RELEASE_REPO)" \
+		-o dist/elasticclaw-windows-amd64.exe .
 
 
 build-bridge:

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/elasticclaw/elasticclaw/pkg/config"
+	"github.com/elasticclaw/elasticclaw/pkg/release"
 	"github.com/spf13/cobra"
 )
 
@@ -85,20 +86,21 @@ func runHubUpgrade(cmd *cobra.Command, args []string) error {
 	remoteVer := parseVersionFromOutput(strings.TrimSpace(remoteVerOut))
 
 	// Determine target version: --version flag overrides track-based lookup.
+	relOwner, relRepo := release.Repo()
 	targetVer := hubUpgradeVersion
 	if targetVer == "" {
 		if Version == "dev" {
-			return fmt.Errorf("cannot upgrade hub from a dev build — use --version or download a release from https://github.com/elasticclaw/elasticclaw/releases")
+			return fmt.Errorf("cannot upgrade hub from a dev build — use --version or download a release from %s", release.ReleasesPageURL())
 		}
 		// Find the latest release on the same track as the client.
 		var err error
-		targetVer, err = latestReleaseOnTrack("elasticclaw", "elasticclaw", Version)
+		targetVer, err = latestReleaseOnTrack(relOwner, relRepo, Version)
 		if err != nil {
 			return fmt.Errorf("no releases found on track %s: %w", extractTrack(Version), err)
 		}
 	} else {
 		// Explicit --version: verify the release exists.
-		if err := findGitHubRelease("elasticclaw", "elasticclaw", targetVer); err != nil {
+		if err := findGitHubRelease(relOwner, relRepo, targetVer); err != nil {
 			return fmt.Errorf("no matching release for version %s: %w", targetVer, err)
 		}
 	}
@@ -111,10 +113,10 @@ func runHubUpgrade(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build download URL for linux/amd64 (server is always linux)
-	downloadURL := fmt.Sprintf(
-		"https://github.com/elasticclaw/elasticclaw/releases/download/%s/elasticclaw-linux-amd64",
-		targetVer,
-	)
+	downloadURL, err := release.DownloadURL(targetVer, "linux", "amd64")
+	if err != nil {
+		return err
+	}
 
 	moveCmd := "mv /tmp/elasticclaw-new \"$SELF\""
 	versionCmd := "elasticclaw version 2>/dev/null"
