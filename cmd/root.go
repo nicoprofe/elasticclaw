@@ -26,6 +26,14 @@ runs them on pluggable providers, and binds each one to scoped, short-lived iden
 }
 
 func Execute() {
+	// A double-click in Explorer arrives with no arguments and no terminal to
+	// read output from. Printing help there is useless, so start the server and
+	// open the dashboard instead.
+	if len(os.Args) == 1 && startedByExplorer() {
+		runDesktopLaunch()
+		return
+	}
+
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
