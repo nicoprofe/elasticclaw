@@ -125,8 +125,8 @@ func TestWorkspaceFlakeStageCommand(t *testing.T) {
 			name: "ignores invalid paths",
 			dir:  "/workspace",
 			files: map[string]string{
-				"flake.nix": "{}",
-				"../secret": "secret",
+				"flake.nix":   "{}",
+				"../secret":   "secret",
 				"/etc/passwd": "pw",
 			},
 			wantNames:   []string{"flake.nix"},
@@ -1633,7 +1633,9 @@ func TestHandleInitialPlanResponseMarksAcceptedOrCorrection(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.insertSystemMarker("claw-plan", "test-tenant-id", initialPlanRequiredMarker)
-	s.handleInitialPlanResponse("claw-plan", "test-tenant-id", "Good, build passes. Now let me read the existing test files.")
+	if !s.handleInitialPlanResponse("claw-plan", "test-tenant-id", "Good, build passes. Now let me read the existing test files.") {
+		t.Fatalf("invalid initial plan was not consumed")
+	}
 	if !s.hasSystemMarker("claw-plan", initialPlanCorrectionSentMarker) {
 		t.Fatalf("invalid initial plan did not mark correction sent")
 	}
@@ -1649,13 +1651,18 @@ func TestHandleInitialPlanResponseMarksAcceptedOrCorrection(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.insertSystemMarker("claw-valid-plan", "test-tenant-id", initialPlanRequiredMarker)
-	valid := `I understand the issue is that the agent is not reliably sending a visible plan before it starts implementation. The likely code area is the hub server message flow and workflow wake handling code. My plan is to add persisted plan-required state, validate the first assistant message, and send a proceed instruction only after the plan is accepted. I will verify the change with focused server tests and the hub package tests.`
-	s.handleInitialPlanResponse("claw-valid-plan", "test-tenant-id", valid)
+	valid := `I understand the issue is that the agent is not reliably sending a visible plan before it starts implementation. The likely code area is the hub server message flow and workflow wake handling code. My plan is to add persisted plan-required state, validate the first assistant message, and send a proceed instruction only after the plan is accepted. I will verify the change with focused server tests and the hub package tests, then say [READY_TO_TEST].`
+	if !s.handleInitialPlanResponse("claw-valid-plan", "test-tenant-id", valid) {
+		t.Fatalf("valid initial plan was not consumed")
+	}
 	if !s.hasSystemMarker("claw-valid-plan", initialPlanAcceptedMarker) {
 		t.Fatalf("valid initial plan was not accepted")
 	}
 	if s.hasSystemMarker("claw-valid-plan", initialPlanCorrectionSentMarker) {
 		t.Fatalf("valid initial plan marked correction sent")
+	}
+	if s.handleInitialPlanResponse("claw-valid-plan", "test-tenant-id", valid) {
+		t.Fatalf("accepted initial plan was consumed more than once")
 	}
 }
 

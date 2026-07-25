@@ -46,6 +46,7 @@ type WorkflowConfig struct {
 	AllowedLabelers     []string          `yaml:"allowed_labelers,omitempty" json:"allowed_labelers,omitempty"`
 	SecretRefs          map[string]string `yaml:"secret_refs,omitempty" json:"secret_refs,omitempty"`
 	Volumes             []WorkflowVolume  `yaml:"volumes,omitempty" json:"volumes,omitempty"`
+	Environment         WorkflowEnv       `yaml:"environment,omitempty" json:"environment,omitempty"`
 	Inputs              []FactoryInput    `yaml:"inputs,omitempty" json:"inputs,omitempty"`
 	ConcurrencyGroup    string            `yaml:"concurrency_group,omitempty" json:"concurrency_group,omitempty"`
 	EnableManualTrigger bool              `yaml:"enable_manual_trigger,omitempty" json:"enable_manual_trigger,omitempty"`
@@ -54,6 +55,21 @@ type WorkflowConfig struct {
 	Trigger             *WorkflowTrigger  `yaml:"trigger,omitempty" json:"trigger,omitempty"`
 	Stages              []WorkflowStage   `yaml:"stages,omitempty" json:"stages,omitempty"`
 	PipelineYAML        string            `yaml:"pipeline_yaml,omitempty" json:"pipelineYAML,omitempty"`
+}
+
+// WorkflowEnv controls repository environment validation before the
+// workflow's entry stage is delivered to the agent.
+type WorkflowEnv struct {
+	// Preflight is one of: warn (default), required, or off.
+	Preflight string `yaml:"preflight,omitempty" json:"preflight,omitempty"`
+	// Setup is an explicit, workflow-owned command that prepares cloned
+	// repositories before preflight validation and before the agent starts.
+	Setup *WorkflowEnvSetup `yaml:"setup,omitempty" json:"setup,omitempty"`
+}
+
+type WorkflowEnvSetup struct {
+	Command string `yaml:"command" json:"command"`
+	Timeout string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 }
 
 // WorkflowVolume declares a hub-managed artifact-backed directory attached to

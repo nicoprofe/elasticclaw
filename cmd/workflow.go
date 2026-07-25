@@ -46,6 +46,7 @@ type workflowCLIView struct {
 	PipelineYAML         string                   `json:"pipelineYAML"`
 	EnableManualTrigger  bool                     `json:"enableManualTrigger"`
 	SecretRefs           map[string]string        `json:"secretRefs"`
+	Environment          types.WorkflowEnv        `json:"environment"`
 	Inputs               []map[string]interface{} `json:"inputs"`
 	RawConfig            string                   `json:"rawConfig,omitempty"`
 }

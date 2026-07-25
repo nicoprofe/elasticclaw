@@ -52,6 +52,7 @@ type WorkflowView struct {
 	EnableManualTrigger  bool                   `json:"enableManualTrigger,omitempty"`
 	SecretRefs           map[string]string      `json:"secretRefs,omitempty"`
 	Volumes              []types.WorkflowVolume `json:"volumes,omitempty"`
+	Environment          types.WorkflowEnv      `json:"environment,omitempty"`
 	Inputs               []types.FactoryInput   `json:"inputs,omitempty"`
 	RawConfig            string                 `json:"rawConfig,omitempty"`
 }
@@ -500,6 +501,7 @@ func workflowToView(workspaceName string, workflow *types.WorkflowConfig) Workfl
 		EnableManualTrigger:  workflow.EnableManualTrigger,
 		SecretRefs:           cloneStringMap(workflow.SecretRefs),
 		Volumes:              append([]types.WorkflowVolume(nil), workflow.Volumes...),
+		Environment:          workflow.Environment,
 		Inputs:               append([]types.FactoryInput(nil), workflow.Inputs...),
 	}
 }

@@ -222,6 +222,25 @@ func (w *WorkflowConfig) Validate() error {
 	if w.Provider != "" && !validProviders[w.Provider] {
 		return fmt.Errorf("workflow %q: invalid provider %q (must be one of: %s)", w.Name, w.Provider, validProviderList)
 	}
+	switch strings.ToLower(strings.TrimSpace(w.Environment.Preflight)) {
+	case "", "warn", "required", "off":
+	default:
+		return fmt.Errorf("workflow %q: invalid environment.preflight %q (must be one of: warn, required, off)", w.Name, w.Environment.Preflight)
+	}
+	if setup := w.Environment.Setup; setup != nil {
+		if strings.TrimSpace(setup.Command) == "" {
+			return fmt.Errorf("workflow %q: environment.setup.command is required", w.Name)
+		}
+		if strings.TrimSpace(setup.Timeout) != "" {
+			timeout, err := time.ParseDuration(strings.TrimSpace(setup.Timeout))
+			if err != nil {
+				return fmt.Errorf("workflow %q: invalid environment.setup.timeout %q: %v", w.Name, setup.Timeout, err)
+			}
+			if timeout <= 0 {
+				return fmt.Errorf("workflow %q: environment.setup.timeout must be positive", w.Name)
+			}
+		}
+	}
 	if w.Trigger != nil {
 		if err := validateWorkflowTrigger(w.Name, w.Trigger); err != nil {
 			return err

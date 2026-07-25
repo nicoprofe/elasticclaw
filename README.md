@@ -105,6 +105,29 @@ trigger:
 
 See the [Linear issue workflow example](examples/workflows/linear-issue.yaml).
 
+### Repository environment preflight
+
+Before delivering the entry-stage prompt to an agent, workflow claws scan
+checked-out repositories for common runtime declarations such as
+`pyproject.toml`, `package.json`, `go.mod`, and `rust-toolchain.toml`. The scan
+also checks executables referenced by workflow `run` commands and writes its
+findings to `REPO_ENVIRONMENT.md`. It reads manifests but does not execute
+repository setup scripts or install dependencies.
+
+Preflight warnings are enabled by default. Use `required` to stop an
+incompatible workflow before model work begins, or `off` to disable the scan:
+
+```yaml
+environment:
+  preflight: required
+
+stages:
+  - id: test
+    on_enter:
+      run:
+        command: cd my-repo && .venv/bin/python -m pytest -q
+```
+
 ## Three ways to start work
 
 **From an issue tracker**

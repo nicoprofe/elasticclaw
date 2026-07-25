@@ -2623,8 +2623,9 @@ func (s *Server) handleClawWS(w http.ResponseWriter, r *http.Request) {
 					s.broadcastToUsers(tenantID, types.WSMessage{Type: "message", Payload: hm})
 				}
 				automaticContinuationPaused := s.observeCompletedTurn(clawID, hm.ID, hm.Content)
+				initialPlanResponse := false
 				if !automaticContinuationPaused {
-					s.handleInitialPlanResponse(clawID, tenantID, hm.Content)
+					initialPlanResponse = s.handleInitialPlanResponse(clawID, tenantID, hm.Content)
 				}
 				// Evaluate pipeline triggers. If a pipeline explicitly owns a
 				// [DONE] trigger, let it handle that signal instead of the
@@ -2635,7 +2636,7 @@ func (s *Server) handleClawWS(w http.ResponseWriter, r *http.Request) {
 				if strings.Contains(hm.Content, "[DONE]") {
 					pipelineDoneCtx, pipelineDoneStage, pipelineHandledDone = s.pipelineStageForMessageContains(clawID, hm.Content)
 				}
-				if automaticContinuationPaused {
+				if automaticContinuationPaused || initialPlanResponse {
 					pipelineHandledDone = false
 				} else if pipelineHandledDone {
 					prURLs := extractDonePRURLs(hm.Content)
@@ -2653,7 +2654,7 @@ func (s *Server) handleClawWS(w http.ResponseWriter, r *http.Request) {
 					},
 				})
 				// Check for [DONE] signal from a factory-created claw
-				if strings.Contains(hm.Content, "[DONE]") {
+				if !initialPlanResponse && strings.Contains(hm.Content, "[DONE]") {
 					s.safeGo("done checkpoint", func() {
 						if _, err := s.requestCheckpoint(context.Background(), clawID, "done", "hub", false, checkpointRequestTimeout); err != nil {
 							log.Printf("[checkpoint] done request for %s failed: %v", shortID(clawID), err)
@@ -2664,11 +2665,13 @@ func (s *Server) handleClawWS(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				// Check for [TERMINATE] signal - allows claw to manage its own lifecycle
-				if strings.Contains(hm.Content, "[TERMINATE]") {
+				if !initialPlanResponse && strings.Contains(hm.Content, "[TERMINATE]") {
 					go s.handleClawTerminateSignal(clawID, hm.Content)
 				}
 				// Detect and store any PR URLs mentioned by the agent
-				go s.scanMessageForPRs(clawID, hm.Content)
+				if !initialPlanResponse {
+					go s.scanMessageForPRs(clawID, hm.Content)
+				}
 				// Detect tool error loops and inject a corrective message
 				if !automaticContinuationPaused && detectToolLoop(hm.Content) {
 					s.mu.RLock()
@@ -4372,6 +4375,51 @@ func (s *Server) startWorkflowAfterVolumes(ctx context.Context, cc *clawConn, cl
 			return
 		}
 
+		if s.workflowEnvironmentApplies(clawID) {
+			environmentPrepared, err := s.workflowEnvironmentPrepared(clawID)
+			if err != nil {
+				cc.mu.Lock()
+				cc.workflowStartPending = false
+				cc.mu.Unlock()
+				log.Printf("[environment] state check for %s failed: %v", clawID[:8], err)
+				s.releaseWorkflowVolumeLeases(clawID)
+				go s.stopAgentTerminalWithReason(clawID, fmt.Sprintf("Environment state check failed: %v", err), false)
+				return
+			}
+			if environmentPrepared {
+				log.Printf("[environment] reusing prepared environment for %s", clawID[:8])
+			} else {
+				if err := s.runWorkflowEnvironmentSetup(clawID); err != nil {
+					cc.mu.Lock()
+					cc.workflowStartPending = false
+					cc.mu.Unlock()
+					log.Printf("[environment] setup for %s failed: %v", clawID[:8], err)
+					s.releaseWorkflowVolumeLeases(clawID)
+					go s.stopAgentTerminalWithReason(clawID, fmt.Sprintf("Environment setup failed: %v", err), false)
+					return
+				}
+
+				if err := s.runWorkflowEnvironmentPreflight(clawID); err != nil {
+					cc.mu.Lock()
+					cc.workflowStartPending = false
+					cc.mu.Unlock()
+					log.Printf("[environment] preflight for %s failed: %v", clawID[:8], err)
+					s.releaseWorkflowVolumeLeases(clawID)
+					go s.stopAgentTerminalWithReason(clawID, fmt.Sprintf("Environment preflight failed: %v", err), false)
+					return
+				}
+				if err := s.markWorkflowEnvironmentPrepared(clawID); err != nil {
+					cc.mu.Lock()
+					cc.workflowStartPending = false
+					cc.mu.Unlock()
+					log.Printf("[environment] state write for %s failed: %v", clawID[:8], err)
+					s.releaseWorkflowVolumeLeases(clawID)
+					go s.stopAgentTerminalWithReason(clawID, fmt.Sprintf("Environment state write failed: %v", err), false)
+					return
+				}
+			}
+		}
+
 		cc.mu.Lock()
 		cc.workflowStartPending = false
 		cc.workflowStartDone = true
@@ -5699,19 +5747,20 @@ func (s *Server) insertSystemMarker(clawID, tenantID, marker string) bool {
 	return rows > 0
 }
 
-func (s *Server) handleInitialPlanResponse(clawID, tenantID, content string) {
+func (s *Server) handleInitialPlanResponse(clawID, tenantID, content string) bool {
 	if !s.hasSystemMarker(clawID, initialPlanRequiredMarker) || s.hasSystemMarker(clawID, initialPlanAcceptedMarker) {
-		return
+		return false
 	}
 	if isValidInitialPlan(content) {
 		_ = s.insertSystemMarker(clawID, tenantID, initialPlanAcceptedMarker)
 		s.injectHubMessageByID(clawID, initialPlanProceedContent)
-		return
+		return true
 	}
 	if !s.hasSystemMarker(clawID, initialPlanCorrectionSentMarker) {
 		_ = s.insertSystemMarker(clawID, tenantID, initialPlanCorrectionSentMarker)
 		s.injectHubMessageByID(clawID, initialPlanCorrectionContent)
 	}
+	return true
 }
 
 func (s *Server) handleInitialPlanActivity(clawID, tenantID string, activity map[string]interface{}) {
