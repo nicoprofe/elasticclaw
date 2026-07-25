@@ -171,3 +171,16 @@ func TestManifestHomepageIsPublicButRedirectIsLocal(t *testing.T) {
 		t.Errorf("redirect_url %q must point back at the local hub", m.RedirectURL)
 	}
 }
+
+// The open page must not auto-submit. Submitting while signed out routes the POST
+// through GitHub's login redirect, which drops the body — GitHub then reports
+// `"url" wasn't supplied` even though the manifest was complete. The interstitial
+// exists precisely so the user can sign in before the form is posted.
+func TestManifestOpenPageDoesNotAutoSubmit(t *testing.T) {
+	if strings.Contains(manifestOpenPage, "submit()") {
+		t.Fatal("open page auto-submits — a signed-out user loses the manifest to the login redirect")
+	}
+	if !strings.Contains(manifestOpenPage, "signed in to GitHub") {
+		t.Error("open page should tell the user to sign in before continuing")
+	}
+}

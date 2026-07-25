@@ -306,9 +306,13 @@ func (s *Server) handleGitHubAppManifestLaunch(w http.ResponseWriter, r *http.Re
 	})
 }
 
-// manifestOpenPage posts the manifest to GitHub on the user's behalf. It renders
-// a real button as well as auto-submitting, because a browser that blocks the
-// scripted submit would otherwise show a blank page.
+// manifestOpenPage posts the manifest to GitHub when the user clicks Continue.
+//
+// It deliberately does NOT auto-submit. Posting while signed out sends the
+// browser through GitHub's login redirect, which drops the POST body — GitHub
+// then sees no manifest at all and reports `"url" wasn't supplied`, an error that
+// points at entirely the wrong problem. An interstitial gives the user the chance
+// to sign in first, and if they forget, the page is still there to click again.
 const manifestOpenPage = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Connect GitHub</title>
 <style>
@@ -321,14 +325,17 @@ const manifestOpenPage = `<!doctype html>
         padding:.75rem 1.5rem;font-size:15px;font-weight:600;cursor:pointer}
 </style></head>
 <body><div class="card">
- <h1>Creating your GitHub App</h1>
- <p>GitHub will ask you to approve an app called <strong>{{.AppName}}</strong>. It is created
-    under your own account, and you choose which repositories it can touch on the next screen.</p>
+ <h1>Connect GitHub</h1>
+ <p>GitHub will create an app called <strong>{{.AppName}}</strong> under your own account.
+    You choose which repositories it can touch on the next screen.</p>
+ <p><strong>First, make sure you are signed in to GitHub</strong> —
+    <a href="https://github.com/login" target="_blank" rel="noopener" style="color:#67e8f9">sign in here</a>
+    if you are not, then come back to this tab.</p>
  <form id="f" method="post" action="{{.Action}}">
    <input type="hidden" name="manifest" value="{{.Manifest}}">
    <button type="submit">Continue to GitHub</button>
  </form>
- <script>document.getElementById('f').submit()</script>
+ <p style="font-size:13px;margin-top:1rem">If GitHub shows an error, sign in and click the button again — this page stays valid for 15 minutes.</p>
 </div></body></html>`
 
 // handleGitHubAppManifestOpen serves the auto-submitting page for a valid ticket.
