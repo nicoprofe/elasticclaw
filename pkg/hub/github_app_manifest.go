@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -93,6 +94,20 @@ func randomManifestState() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// appHomepageURL is the "url" the manifest declares: the App's homepage, shown on
+// its GitHub page. It must be publicly reachable — GitHub rejects a loopback
+// address here and reports it, confusingly, as `"url" wasn\'t supplied`. It is
+// display-only and never contacted by the hub, so pointing it at the product site
+// is both valid and honest. Override with ELASTICCLAW_APP_HOMEPAGE.
+const defaultAppHomepage = "https://www.elasticclaw.ai"
+
+func appHomepageURL() string {
+	if v := strings.TrimSpace(os.Getenv("ELASTICCLAW_APP_HOMEPAGE")); v != "" {
+		return v
+	}
+	return defaultAppHomepage
 }
 
 // defaultAppName proposes a name for the App to be created.
@@ -224,7 +239,7 @@ func (s *Server) handleGitHubAppManifestStart(w http.ResponseWriter, r *http.Req
 
 	base := hubBaseURLFromRequest(r)
 	webhookURL, webhookActive := manifestWebhook(base, workspace, r.Host)
-	manifest := buildGitHubAppManifest(appName, base, base+"/api/github/app-manifest/callback", webhookURL, webhookActive)
+	manifest := buildGitHubAppManifest(appName, appHomepageURL(), base+"/api/github/app-manifest/callback", webhookURL, webhookActive)
 
 	// Apps created for an organization must be posted to the org's own path.
 	target := "https://github.com/settings/apps/new"
@@ -339,7 +354,7 @@ func (s *Server) handleGitHubAppManifestOpen(w http.ResponseWriter, r *http.Requ
 	base := hubBaseURLFromRequest(r)
 	webhookURL, webhookActive := manifestWebhook(base, pending.Workspace, r.Host)
 	appName := defaultAppName(pending.Workspace)
-	manifest := buildGitHubAppManifest(appName, base, base+"/api/github/app-manifest/callback", webhookURL, webhookActive)
+	manifest := buildGitHubAppManifest(appName, appHomepageURL(), base+"/api/github/app-manifest/callback", webhookURL, webhookActive)
 	manifestJSON, err := json.Marshal(manifest)
 	if err != nil {
 		http.Error(w, "could not build the manifest", http.StatusInternalServerError)

@@ -154,3 +154,20 @@ func TestDefaultAppNameIsQualifiedByWorkspace(t *testing.T) {
 		t.Errorf("defaultAppName(ElasticClaw) = %q, want ElasticClaw", got)
 	}
 }
+
+// GitHub rejects a loopback homepage url with `"url" wasn't supplied`, so the
+// manifest must declare a public one. redirect_url stays on the hub, because that
+// is where the callback has to land and GitHub permits loopback there.
+func TestManifestHomepageIsPublicButRedirectIsLocal(t *testing.T) {
+	m := buildGitHubAppManifest("ElasticClaw", appHomepageURL(),
+		"http://127.0.0.1:8080/api/github/app-manifest/callback", "", false)
+	if strings.Contains(m.URL, "127.0.0.1") || strings.Contains(m.URL, "localhost") {
+		t.Errorf("homepage url %q is loopback — GitHub refuses the manifest", m.URL)
+	}
+	if !strings.HasPrefix(m.URL, "https://") {
+		t.Errorf("homepage url %q should be https", m.URL)
+	}
+	if !strings.Contains(m.RedirectURL, "127.0.0.1") {
+		t.Errorf("redirect_url %q must point back at the local hub", m.RedirectURL)
+	}
+}
