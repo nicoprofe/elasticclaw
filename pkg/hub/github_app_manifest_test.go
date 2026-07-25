@@ -11,7 +11,7 @@ import (
 // The manifest must never ask for more than InstallationToken actually requests,
 // or the user grants access the product cannot justify.
 func TestManifestPermissionsMatchWhatTokensRequest(t *testing.T) {
-	m := buildGitHubAppManifest("ElasticClaw", "http://127.0.0.1:8080", "http://127.0.0.1:8080/cb", "")
+	m := buildGitHubAppManifest("ElasticClaw", "http://127.0.0.1:8080", "http://127.0.0.1:8080/cb", "http://127.0.0.1:8080/hook", false)
 
 	want := map[string]string{
 		"contents":      "write",
@@ -35,18 +35,40 @@ func TestManifestPermissionsMatchWhatTokensRequest(t *testing.T) {
 	}
 }
 
-// A loopback hub cannot receive webhooks, so requesting them would only produce
-// delivery failures in the user's GitHub settings.
-func TestManifestOmitsWebhookForUnreachableHub(t *testing.T) {
-	m := buildGitHubAppManifest("ElasticClaw", "http://127.0.0.1:8080", "http://127.0.0.1:8080/cb", "")
-	if len(m.HookAttributes) != 0 {
-		t.Errorf("expected no webhook for a loopback hub, got %v", m.HookAttributes)
+// GitHub rejects a manifest with no hook url ("Hook url cannot be blank"), so the
+// url is always declared. A loopback hub cannot receive deliveries, so the hook is
+// marked inactive rather than omitted — an earlier version omitted it and GitHub
+// refused to create the App at all.
+func TestManifestAlwaysDeclaresAHookURL(t *testing.T) {
+	loopback := buildGitHubAppManifest("ElasticClaw", "http://127.0.0.1:8080",
+		"http://127.0.0.1:8080/cb", "http://127.0.0.1:8080/api/workspaces/w/webhooks/github", false)
+	if loopback.HookAttributes["url"] == "" {
+		t.Error("hook url is blank — GitHub rejects the manifest outright")
+	}
+	if active, _ := loopback.HookAttributes["active"].(bool); active {
+		t.Error("deliveries should be disabled for a hub GitHub cannot reach")
 	}
 
 	reachable := buildGitHubAppManifest("ElasticClaw", "https://hub.example.com",
-		"https://hub.example.com/cb", "https://hub.example.com/api/workspaces/w/webhooks/github")
-	if reachable.HookAttributes["url"] == "" {
-		t.Error("expected a webhook URL for a publicly reachable hub")
+		"https://hub.example.com/cb", "https://hub.example.com/api/workspaces/w/webhooks/github", true)
+	if active, _ := reachable.HookAttributes["active"].(bool); !active {
+		t.Error("deliveries should be enabled for a publicly reachable hub")
+	}
+}
+
+// The url must be present regardless of whether a workspace was selected.
+func TestManifestWebhookNeverBlank(t *testing.T) {
+	for _, ws := range []string{"agent-race", ""} {
+		url, active := manifestWebhook("http://127.0.0.1:8080", ws, "127.0.0.1:8080")
+		if url == "" {
+			t.Errorf("workspace %q produced a blank hook url", ws)
+		}
+		if active {
+			t.Errorf("workspace %q enabled deliveries to a loopback host", ws)
+		}
+	}
+	if _, active := manifestWebhook("https://hub.example.com", "w", "hub.example.com"); !active {
+		t.Error("a reachable host should have deliveries enabled")
 	}
 }
 

@@ -85,6 +85,8 @@ func (s *manifestStateStore) take(state string) (manifestState, bool) {
 	return v, true
 }
 
+func urlPathEscape(s string) string { return url.PathEscape(s) }
+
 func randomManifestState() (string, error) {
 	buf := make([]byte, 24)
 	if _, err := rand.Read(buf); err != nil {
@@ -116,7 +118,7 @@ type githubAppManifest struct {
 	Public             bool              `json:"public"`
 	DefaultPermissions map[string]string `json:"default_permissions"`
 	DefaultEvents      []string          `json:"default_events"`
-	HookAttributes     map[string]string `json:"hook_attributes,omitempty"`
+	HookAttributes     map[string]any    `json:"hook_attributes,omitempty"`
 }
 
 // buildGitHubAppManifest describes the App the hub needs.
@@ -126,7 +128,9 @@ type githubAppManifest struct {
 // pull_requests are write because agents push branches and open PRs; issues is
 // write so issue-triggered workflows can comment and label; checks and metadata
 // are read-only status inputs.
-func buildGitHubAppManifest(appName, hubBaseURL, redirectURL, webhookURL string) githubAppManifest {
+// buildGitHubAppManifest takes webhookURL unconditionally and disables delivery
+// when the hub is unreachable, rather than omitting the field.
+func buildGitHubAppManifest(appName, hubBaseURL, redirectURL, webhookURL string, webhookActive bool) githubAppManifest {
 	m := githubAppManifest{
 		Name:        appName,
 		URL:         hubBaseURL,
@@ -141,10 +145,14 @@ func buildGitHubAppManifest(appName, hubBaseURL, redirectURL, webhookURL string)
 		},
 		DefaultEvents: []string{"issues", "pull_request", "pull_request_review", "check_suite"},
 	}
-	// A loopback hub is not reachable from GitHub, so requesting a webhook there
-	// would only produce delivery failures. Issue triggers still work by polling.
+	// GitHub validates that a hook url is present and rejects the whole manifest
+	// with "Hook url cannot be blank" when it is missing — so it is always sent.
+	// A loopback hub cannot receive deliveries, so the hook is marked inactive
+	// instead of omitted: the App is created, and GitHub does not accumulate
+	// failed deliveries against an address it can never reach. Issue triggers
+	// still work by polling.
 	if webhookURL != "" {
-		m.HookAttributes = map[string]string{"url": webhookURL}
+		m.HookAttributes = map[string]any{"url": webhookURL, "active": webhookActive}
 	}
 	return m
 }
@@ -161,6 +169,18 @@ func hubBaseURLFromRequest(r *http.Request) string {
 		scheme = forwarded
 	}
 	return scheme + "://" + r.Host
+}
+
+// manifestWebhook returns the webhook URL to declare and whether deliveries
+// should be enabled. The URL is never blank, because GitHub rejects a manifest
+// without one.
+func manifestWebhook(base, workspace, host string) (string, bool) {
+	target := workspace
+	if target == "" {
+		target = "default"
+	}
+	url := fmt.Sprintf("%s/api/workspaces/%s/webhooks/github", base, urlPathEscape(target))
+	return url, !isLoopbackHost(host)
 }
 
 // isLoopbackHost reports whether GitHub would be unable to reach this host.
@@ -197,11 +217,8 @@ func (s *Server) handleGitHubAppManifestStart(w http.ResponseWriter, r *http.Req
 	s.manifestStates.put(state, manifestState{Workspace: workspace, CreatedAt: time.Now()})
 
 	base := hubBaseURLFromRequest(r)
-	webhookURL := ""
-	if workspace != "" && !isLoopbackHost(r.Host) {
-		webhookURL = fmt.Sprintf("%s/api/workspaces/%s/webhooks/github", base, url.PathEscape(workspace))
-	}
-	manifest := buildGitHubAppManifest(appName, base, base+"/api/github/app-manifest/callback", webhookURL)
+	webhookURL, webhookActive := manifestWebhook(base, workspace, r.Host)
+	manifest := buildGitHubAppManifest(appName, base, base+"/api/github/app-manifest/callback", webhookURL, webhookActive)
 
 	// Apps created for an organization must be posted to the org's own path.
 	target := "https://github.com/settings/apps/new"
@@ -314,12 +331,9 @@ func (s *Server) handleGitHubAppManifestOpen(w http.ResponseWriter, r *http.Requ
 	s.manifestStates.put(state, manifestState{Workspace: pending.Workspace, CreatedAt: time.Now()})
 
 	base := hubBaseURLFromRequest(r)
-	webhookURL := ""
-	if pending.Workspace != "" && !isLoopbackHost(r.Host) {
-		webhookURL = fmt.Sprintf("%s/api/workspaces/%s/webhooks/github", base, url.PathEscape(pending.Workspace))
-	}
+	webhookURL, webhookActive := manifestWebhook(base, pending.Workspace, r.Host)
 	appName := defaultAppName(pending.Workspace)
-	manifest := buildGitHubAppManifest(appName, base, base+"/api/github/app-manifest/callback", webhookURL)
+	manifest := buildGitHubAppManifest(appName, base, base+"/api/github/app-manifest/callback", webhookURL, webhookActive)
 	manifestJSON, err := json.Marshal(manifest)
 	if err != nil {
 		http.Error(w, "could not build the manifest", http.StatusInternalServerError)
