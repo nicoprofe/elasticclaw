@@ -116,3 +116,19 @@ func TestHubBaseURLFromRequestHonoursForwardedProto(t *testing.T) {
 		t.Errorf("hubBaseURLFromRequest = %q, want an https URL", got)
 	}
 }
+
+// GitHub App names are globally unique, so a fixed name collides with any App
+// that already exists and creation fails outright.
+func TestDefaultAppNameIsQualifiedByWorkspace(t *testing.T) {
+	if got := defaultAppName("agent-race"); got != "ElasticClaw agent-race" {
+		t.Errorf("defaultAppName(agent-race) = %q, want %q", got, "ElasticClaw agent-race")
+	}
+	// With no workspace there is nothing to qualify with; the user renames on GitHub.
+	if got := defaultAppName(""); got != "ElasticClaw" {
+		t.Errorf("defaultAppName(\"\") = %q, want ElasticClaw", got)
+	}
+	// Avoid the silly "ElasticClaw elasticclaw".
+	if got := defaultAppName("ElasticClaw"); got != "ElasticClaw" {
+		t.Errorf("defaultAppName(ElasticClaw) = %q, want ElasticClaw", got)
+	}
+}

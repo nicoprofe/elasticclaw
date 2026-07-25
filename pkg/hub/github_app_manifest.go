@@ -93,6 +93,21 @@ func randomManifestState() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
+// defaultAppName proposes a name for the App to be created.
+//
+// GitHub App names are globally unique across all of GitHub, so a fixed
+// "ElasticClaw" is already taken and creation fails with "Name has already been
+// taken" — a dead end for anyone who is not going to think to rename it.
+// Qualifying with the workspace makes a collision unlikely, and GitHub still lets
+// the name be edited on the creation page if it happens.
+func defaultAppName(workspace string) string {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" || strings.EqualFold(workspace, "elasticclaw") {
+		return "ElasticClaw"
+	}
+	return "ElasticClaw " + workspace
+}
+
 // githubAppManifest is the App description GitHub creates from.
 type githubAppManifest struct {
 	Name               string            `json:"name"`
@@ -171,7 +186,7 @@ func (s *Server) handleGitHubAppManifestStart(w http.ResponseWriter, r *http.Req
 	org := strings.TrimSpace(r.URL.Query().Get("org"))
 	appName := strings.TrimSpace(r.URL.Query().Get("name"))
 	if appName == "" {
-		appName = "ElasticClaw"
+		appName = defaultAppName(workspace)
 	}
 
 	state, err := randomManifestState()
@@ -268,7 +283,7 @@ func (s *Server) handleGitHubAppManifestOpen(w http.ResponseWriter, r *http.Requ
 	if pending.Workspace != "" && !isLoopbackHost(r.Host) {
 		webhookURL = fmt.Sprintf("%s/api/workspaces/%s/webhooks/github", base, url.PathEscape(pending.Workspace))
 	}
-	appName := "ElasticClaw"
+	appName := defaultAppName(pending.Workspace)
 	manifest := buildGitHubAppManifest(appName, base, base+"/api/github/app-manifest/callback", webhookURL)
 	manifestJSON, err := json.Marshal(manifest)
 	if err != nil {
