@@ -35,6 +35,7 @@ type WorkflowConfig struct {
 	TerminateOnLeave    bool                     `yaml:"terminate_on_leave,omitempty" json:"terminate_on_leave,omitempty"`
 	Provider            string                   `yaml:"provider,omitempty" json:"provider,omitempty"`
 	AllowedProviders    []WorkflowProviderOption `yaml:"allowed_providers,omitempty" json:"allowed_providers,omitempty"`
+	Preview             *WorkflowPreview         `yaml:"preview,omitempty" json:"preview,omitempty"`
 	NamePattern         string                   `yaml:"name_pattern,omitempty" json:"name_pattern,omitempty"`
 	Tags                []string                 `yaml:"tags,omitempty" json:"tags,omitempty"`
 	Color               string                   `yaml:"color,omitempty" json:"color,omitempty"`
@@ -56,6 +57,15 @@ type WorkflowConfig struct {
 	Trigger             *WorkflowTrigger         `yaml:"trigger,omitempty" json:"trigger,omitempty"`
 	Stages              []WorkflowStage          `yaml:"stages,omitempty" json:"stages,omitempty"`
 	PipelineYAML        string                   `yaml:"pipeline_yaml,omitempty" json:"pipelineYAML,omitempty"`
+}
+
+// WorkflowPreview enables an ephemeral browser preview for a workflow run.
+// The agent discovers the repository-specific start command; ElasticClaw owns
+// exposing the configured port through the selected sandbox provider.
+type WorkflowPreview struct {
+	Port  int    `yaml:"port" json:"port"`
+	Label string `yaml:"label,omitempty" json:"label,omitempty"`
+	TTL   string `yaml:"ttl,omitempty" json:"ttl,omitempty"`
 }
 
 // WorkflowProviderOption is a provider that may be selected for a manual run.

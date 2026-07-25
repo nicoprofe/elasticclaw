@@ -50,6 +50,7 @@ type WorkflowView struct {
 	WebhookSecretRef     string                         `json:"webhookSecretRef,omitempty"`
 	PipelineYAML         string                         `json:"pipelineYAML,omitempty"`
 	EnableManualTrigger  bool                           `json:"enableManualTrigger,omitempty"`
+	Preview              *types.WorkflowPreview         `json:"preview,omitempty"`
 	Provider             string                         `json:"provider,omitempty"`
 	AllowedProviders     []types.WorkflowProviderOption `json:"allowedProviders,omitempty"`
 	SecretRefs           map[string]string              `json:"secretRefs,omitempty"`
@@ -539,6 +540,7 @@ func workflowToView(workspaceName string, workflow *types.WorkflowConfig) Workfl
 		AssignedTo:           workflow.AssignedTo,
 		Enabled:              workflow.Enabled == nil || *workflow.Enabled,
 		EnableManualTrigger:  workflow.EnableManualTrigger,
+		Preview:              workflow.Preview,
 		Provider:             workflow.Provider,
 		AllowedProviders:     append([]types.WorkflowProviderOption(nil), workflow.AllowedProviders...),
 		SecretRefs:           cloneStringMap(workflow.SecretRefs),
