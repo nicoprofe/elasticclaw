@@ -85,8 +85,9 @@ build windows arm64 elasticclaw-windows-arm64.exe
 # Embed the app icon and Windows version metadata. Without a .rsrc resource the
 # taskbar shows a blank default icon and the file's Properties pane has no
 # version or product name — it does not read as an installed application.
-# Best-effort: a missing goversioninfo must not fail a release, it just produces
-# an iconless binary.
+# The icon and version metadata are part of what makes this read as an installed
+# application, so a release that cannot embed them fails rather than shipping a
+# blank-icon exe that nobody notices until it is on a user's taskbar.
 build_windows_resource() {
   local syso="cmd/elasticclaw-desktop/resource_windows_amd64.syso"
   rm -f "$syso"
@@ -95,8 +96,12 @@ build_windows_resource() {
     export PATH="$PATH:$(go env GOPATH)/bin"
   fi
   if ! command -v goversioninfo >/dev/null 2>&1; then
-    echo "  ⚠ goversioninfo unavailable — building without an icon"
-    return 0
+    echo "❌ goversioninfo unavailable — refusing to build a desktop app with no icon" >&2
+    exit 1
+  fi
+  if [[ ! -f build/windows/elasticclaw.ico ]]; then
+    echo "❌ build/windows/elasticclaw.ico is missing — refusing to build without the brand icon" >&2
+    exit 1
   fi
   # Windows version fields are four integers; derive them from the CalVer tag and
   # fall back to zeros for anything non-numeric.

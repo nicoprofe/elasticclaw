@@ -84,6 +84,12 @@ jobs:
               missing=1
             fi
           done
+          # The desktop app must carry an icon and version metadata; without the
+          # resource it shows a blank taskbar icon and empty file Properties.
+          if ! grep -q "ElasticClaw" <(strings -a elasticclaw-desktop-windows-amd64.exe | head -20000); then
+            echo "::error::desktop exe has no version resource (icon/metadata missing)"
+            missing=1
+          fi
           # GitHub asset names are case-insensitive for uniqueness, so two assets
           # differing only in case fail at upload after the whole build has run.
           dupes="$(ls | tr 'A-Z' 'a-z' | sort | uniq -d)"
