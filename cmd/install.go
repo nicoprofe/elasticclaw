@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -242,75 +241,19 @@ func findGitHubRelease(owner, repo, tag string) error {
 	return nil
 }
 
-// extractTrack returns the non-incrementing prefix of a CalVer/SemVer tag.
-//
-//	"2026.05.11-beta.2" → "2026.05.11-beta"
-//	"2026.05.11.1"      → "2026.05.11"
-//	"2026.05.11"        → "2026.05.11"
+// extractTrack names the upgrade track a version belongs to, for use in
+// messages. See release.Channel for the semantics.
 func extractTrack(version string) string {
-	if idx := strings.LastIndex(version, "-"); idx != -1 {
-		suffix := version[idx+1:]
-		if dotIdx := strings.LastIndex(suffix, "."); dotIdx != -1 {
-			if _, err := strconv.Atoi(suffix[dotIdx+1:]); err == nil {
-				return version[:idx+1+dotIdx]
-			}
-		}
-		return version
-	}
-	parts := strings.Split(version, ".")
-	if len(parts) >= 4 {
-		return strings.Join(parts[:3], ".")
-	}
-	return version
+	return release.Channel(version)
 }
 
-// releaseMatchesTrack reports whether a release tag belongs to the same
-// upgrade track as the given track prefix.
-func releaseMatchesTrack(tag, track string) bool {
-	if strings.Contains(track, "-") {
-		return tag == track || strings.HasPrefix(tag, track+".")
-	}
-	if tag == track {
-		return true
-	}
-	if !strings.HasPrefix(tag, track+".") {
-		return false
-	}
-	suffix := tag[len(track)+1:]
-	// Stable track: suffix must be numeric only (no prerelease indicators)
-	if strings.Contains(suffix, "-") {
-		return false
-	}
-	_, err := strconv.Atoi(suffix)
-	return err == nil
-}
-
-// trackSuffix returns the numeric suffix after the track prefix, or 0 if none.
-func trackSuffix(tag, track string) int {
-	if tag == track {
-		return 0
-	}
-	if !strings.HasPrefix(tag, track) {
-		return 0
-	}
-	rest := tag[len(track):]
-	if strings.HasPrefix(rest, ".") {
-		rest = rest[1:]
-	}
-	n, _ := strconv.Atoi(rest)
-	return n
-}
-
-// latestReleaseOnTrack queries GitHub for the most recent release whose tag
-// belongs to the same track as currentVersion. It paginates through releases
-// until it finds at least one match or exhausts all pages (max 10 pages = 1000
-// releases) to avoid the case where >100 releases on other tracks push the
-// target track off the first page.
+// latestReleaseOnTrack queries GitHub for the newest release in the same
+// channel as currentVersion — stable clients see only stable releases, beta
+// clients only betas. It paginates (max 10 pages = 1000 releases) because
+// releases from other channels can push same-channel ones off the first page.
 func latestReleaseOnTrack(owner, repo, currentVersion string) (string, error) {
-	track := extractTrack(currentVersion)
 	const maxPages = 10
-	var best string
-	bestSuffix := -1
+	var tags []string
 
 	for page := 1; page <= maxPages; page++ {
 		url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=100&page=%d", owner, repo, page)
@@ -325,6 +268,7 @@ func latestReleaseOnTrack(owner, repo, currentVersion string) (string, error) {
 
 		var releases []struct {
 			TagName string `json:"tag_name"`
+			Draft   bool   `json:"draft"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
 			resp.Body.Close()
@@ -337,25 +281,20 @@ func latestReleaseOnTrack(owner, repo, currentVersion string) (string, error) {
 		}
 
 		for _, r := range releases {
-			if !releaseMatchesTrack(r.TagName, track) {
+			// A draft has no downloadable assets yet.
+			if r.Draft {
 				continue
 			}
-			suf := trackSuffix(r.TagName, track)
-			if suf > bestSuffix {
-				bestSuffix = suf
-				best = r.TagName
-			}
+			tags = append(tags, r.TagName)
 		}
 
-		// Continue scanning all pages up to maxPages.
-		// GitHub returns releases newest-first by publication time, but
-		// bestSuffix is a version-number comparison — the two orderings
-		// can diverge (e.g. beta.5 published before beta.3). We stop
-		// only when a page is empty.
+		// Scan every page: GitHub orders releases by publication time, which
+		// can disagree with version order (beta.5 published before beta.3).
 	}
 
+	best := release.Newest(currentVersion, tags)
 	if best == "" {
-		return "", fmt.Errorf("no releases found on track %s", track)
+		return "", fmt.Errorf("no releases found on track %s", release.Channel(currentVersion))
 	}
 	return best, nil
 }

@@ -6,14 +6,18 @@ name: Release
 # fetches, so this workflow is the update channel: pushing a tag is what makes a
 # new version reachable by every installed client.
 #
-#   git tag v0.1.0 && git push origin v0.1.0
+#   git tag 2026.7.24 && git push origin 2026.7.24
 #
-# Prerelease tracks are supported — v0.2.0-beta.1 only upgrades beta clients.
+# Prerelease channels are supported: 2026.7.24-beta.1 is offered only to clients
+# already on a beta, never to stable installs.
 
 on:
   push:
     tags:
-      - "v*"
+      # CalVer, matching this project's convention: 2026.7.24, 2026.7.24.1,
+      # 2026.7.24-beta.1. Also accept a "v" prefix in case SemVer is adopted.
+      - "[0-9]*"
+      - "v[0-9]*"
   workflow_dispatch:
     inputs:
       tag:

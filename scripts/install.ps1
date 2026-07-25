@@ -20,7 +20,7 @@
 
 .EXAMPLE
     # Install a specific version, or from a different repository:
-    $env:ELASTICCLAW_VERSION = 'v0.1.0'
+    $env:ELASTICCLAW_VERSION = '2026.7.24'
     $env:ELASTICCLAW_RELEASE_REPO = 'nicoprofe/elasticclaw'
     irm https://raw.githubusercontent.com/nicoprofe/elasticclaw/main/scripts/install.ps1 | iex
 #>

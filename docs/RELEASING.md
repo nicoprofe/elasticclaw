@@ -25,28 +25,45 @@ longer self-update — and the failure only shows up on user machines.
 absent from it or whose hash disagrees, so a release published without it leaves
 clients unable to upgrade (they fail safe rather than installing blindly).
 
+## Versioning
+
+This project uses CalVer: `2026.7.24`, with same-day patches as `2026.7.24.1`,
+`2026.7.24.2`, and prereleases as `2026.7.24-beta.1`. Versions are compared
+component-by-component as numbers, so `2026.7.9` correctly precedes `2026.7.10`.
+
 ## Cutting a release
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag 2026.7.24
+git push origin 2026.7.24
 ```
 
 `.github/workflows/release.yml` then runs `go vet`, `go test`, builds every
 artifact via `scripts/build-release.sh`, asserts the asset contract above, and
-publishes the release. Tags containing a hyphen (`v0.2.0-beta.1`) are published
-as prereleases.
+publishes the release. Tags containing a hyphen (`2026.7.24-beta.1`) are
+published as prereleases.
 
-## Release tracks
+## Release channels
 
-`elasticclaw upgrade` only moves a client within its own track, so a prerelease
-is invisible to stable users:
+A client upgrades to the newest release in its own channel and never crosses
+channels, so a prerelease is invisible to stable installs:
 
-- a client on `v0.1.0` upgrades to the newest `v0.x.y` stable tag
-- a client on `v0.2.0-beta.1` upgrades to the newest `v0.2.0-beta.N`
+- a client on any stable version upgrades to the newest stable tag, including
+  across version lines (`2026.7.22` -> `2026.7.24`)
+- a client on `2026.7.22-beta.3` upgrades to the newest beta (`2026.7.24-beta.1`)
 - `beta -> stable` never happens automatically; that requires a reinstall
+- a client never downgrades, so a build ahead of every published release is left
+  alone rather than rolled back
 
 Use this to stage a rollout: tag a beta, upgrade your own machine, then tag stable.
+
+Channels are derived from the prerelease suffix alone (`pkg/release.Channel`) and
+are deliberately independent of the version numbers. An earlier implementation
+derived the upgrade "track" from the leading version components, which meant a
+client could only ever move within its own version line — under date-based tags
+that stranded every install on the day it was built, with `elasticclaw upgrade`
+reporting "no releases found on track 2026.7.22" indefinitely. If you change this
+logic, keep `pkg/release/version_test.go` green: it pins that scenario.
 
 ## Releasing from a fork
 
@@ -65,13 +82,13 @@ ELASTICCLAW_RELEASE_REPO=owner/repo elasticclaw upgrade
 
 ```bash
 # everything, as CI would build it
-VERSION=v0.1.0 RELEASE_REPO=nicoprofe/elasticclaw scripts/build-release.sh
+VERSION=2026.7.24 RELEASE_REPO=nicoprofe/elasticclaw scripts/build-release.sh
 
 # reuse an existing web build (much faster while iterating)
-SKIP_WEB=1 VERSION=v0.1.0 scripts/build-release.sh
+SKIP_WEB=1 VERSION=2026.7.24 scripts/build-release.sh
 
 # just the Windows exe
-make dist-windows VERSION=v0.1.0 RELEASE_REPO=nicoprofe/elasticclaw
+make dist-windows VERSION=2026.7.24 RELEASE_REPO=nicoprofe/elasticclaw
 ```
 
 Artifacts land in `dist/` (git-ignored). The `-tags embedweb` build serves the

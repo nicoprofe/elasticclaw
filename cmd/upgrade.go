@@ -54,7 +54,9 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no releases found on track %s: %w", extractTrack(current), err)
 	}
 
-	if current == latest {
+	// Only ever move forward: a client built from a tag newer than anything
+	// published must not be rolled backward.
+	if release.Compare(latest, current) <= 0 {
 		fmt.Printf("Already up to date (%s)\n", current)
 		return nil
 	}
