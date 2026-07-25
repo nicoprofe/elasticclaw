@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
@@ -34,6 +35,7 @@ import (
 	"github.com/elasticclaw/elasticclaw/internal/webui"
 
 	"github.com/elasticclaw/elasticclaw/pkg/cliversion"
+	"github.com/elasticclaw/elasticclaw/pkg/config"
 	"github.com/elasticclaw/elasticclaw/pkg/hub/artifact"
 	"github.com/elasticclaw/elasticclaw/pkg/hub/pipeline"
 	daytona "github.com/elasticclaw/elasticclaw/pkg/provider/daytona"
@@ -364,6 +366,7 @@ func (s *Server) run(ctx context.Context, opts ...RunOptions) error {
 	if s.hubCfg.UIPassword == "" {
 		log.Printf("⚠️  Web UI password not set — using default: 'admin'. Set ui_password in hub.yaml to secure the UI.")
 	}
+	s.ensureAPIToken()
 	err := srv.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
 		// ListenAndServe returns as soon as Shutdown starts. Wait for it to
@@ -688,6 +691,38 @@ func (s *Server) tenantByClawToken(token string) (string, error) {
 
 const webSessionHeader = "X-Elasticclaw-Session"
 
+// ensureAPIToken gives a hub that was started without configuration a real API
+// token, and persists it so it survives restarts.
+//
+// A hub started by double-clicking the binary has no hub.yaml to read a token
+// from. handleWebLogin hands the browser hubCfg.Token on success, so without one
+// the dashboard receives an empty credential and cannot call the API it just
+// signed in to. Generating one here keeps the zero-configuration path working
+// while remaining strictly more secure than shipping an empty token.
+func (s *Server) ensureAPIToken() {
+	s.mu.Lock()
+	if s.hubCfg.Token != "" {
+		s.mu.Unlock()
+		return
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		s.mu.Unlock()
+		log.Printf("⚠️  could not generate an API token: %v — sign-in will not return a usable token", err)
+		return
+	}
+	s.hubCfg.Token = hex.EncodeToString(buf)
+	cfgCopy := *s.hubCfg
+	s.mu.Unlock()
+
+	if err := config.SaveHubConfig(&cfgCopy); err != nil {
+		// The in-memory token still works for this run, so this is not fatal.
+		log.Printf("⚠️  generated an API token but could not save it: %v — it will change on restart", err)
+		return
+	}
+	log.Printf("[hub] generated an API token and saved it to hub.yaml")
+}
+
 func (s *Server) resolveUIPassword() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -806,13 +841,20 @@ func (s *Server) handleWebLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	if body.Password != s.resolveUIPassword() {
-		http.Error(w, "invalid password", http.StatusUnauthorized)
-		return
-	}
 	s.mu.RLock()
 	hubToken := s.hubCfg.Token
 	s.mu.RUnlock()
+
+	// The sign-in field is labelled "Access token", so accept the hub API token
+	// as well as the UI password — otherwise pasting the token the field asks for
+	// is rejected. Compared in constant time: both are credentials, and a
+	// byte-by-byte comparison leaks how much of a guess was correct.
+	okPassword := subtle.ConstantTimeCompare([]byte(body.Password), []byte(s.resolveUIPassword())) == 1
+	okToken := hubToken != "" && subtle.ConstantTimeCompare([]byte(body.Password), []byte(hubToken)) == 1
+	if !okPassword && !okToken {
+		http.Error(w, "invalid password", http.StatusUnauthorized)
+		return
+	}
 	jsonOK(w, map[string]interface{}{
 		"ok":       true,
 		"hubToken": hubToken, // hub API token — browser uses for all hub calls
@@ -847,7 +889,12 @@ func (s *Server) handleWebMe(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	githubOAuthEnabled := s.hubCfg.Auth != nil && s.hubCfg.Auth.GitHubOAuth != nil && s.hubCfg.Auth.GitHubOAuth.ClientID != ""
-	passwordAuthEnabled := s.hubCfg.Token != "" && !(s.hubCfg.Auth != nil && s.hubCfg.Auth.DisablePasswordAuth)
+	// This must describe what handleWebLogin actually accepts. It previously also
+	// required hubCfg.Token to be set, which made a hub with no configured token
+	// advertise password auth as disabled — so the login page hid its password
+	// field and rendered an empty card, with no way to sign in, even though
+	// logging in with the resolved UI password would have succeeded.
+	passwordAuthEnabled := !(s.hubCfg.Auth != nil && s.hubCfg.Auth.DisablePasswordAuth)
 	s.mu.RUnlock()
 	jsonOK(w, map[string]bool{
 		"github_oauth_enabled":  githubOAuthEnabled,
