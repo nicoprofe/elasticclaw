@@ -304,7 +304,13 @@ func buildOpenClawOAuthAuthSyncShell(keys []*types.LLMKeyConfig, selectedKeyName
 	return `set -euo pipefail
 # Let OpenClaw create and migrate its own SQLite schema. The short-lived
 # placeholder is replaced below before any gateway or model process starts.
-printf '%s\n' 'elasticclaw-auth-store-initializer' | openclaw models auth paste-token --provider xai --profile-id xai:default --expires-in 1m >/dev/null
+# Fed by heredoc rather than a pipe: paste-token stops reading once it has the
+# token, and under "set -o pipefail" the writer taking SIGPIPE (exit 141) failed
+# the whole script. That made agent bootstrap fail intermittently, depending on
+# whether the writer finished before the reader closed.
+openclaw models auth paste-token --provider xai --profile-id xai:default --expires-in 1m >/dev/null <<'ELASTICCLAW_INIT_TOKEN'
+elasticclaw-auth-store-initializer
+ELASTICCLAW_INIT_TOKEN
 node <<'NODE'
 const fs = require('fs');
 const path = require('path');
