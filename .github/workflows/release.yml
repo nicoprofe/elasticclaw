@@ -86,7 +86,10 @@ jobs:
           done
           # The desktop app must carry an icon and version metadata; without the
           # resource it shows a blank taskbar icon and empty file Properties.
-          if ! grep -q "ElasticClaw" <(strings -a elasticclaw-desktop-windows-amd64.exe | head -20000); then
+          # PE resources store text as UTF-16, so plain ASCII strings never
+          # matches -- and the resource sits at the end of the file, so the output
+          # must not be truncated either.
+          if ! strings -a -el elasticclaw-desktop-windows-amd64.exe | grep -q "ElasticClaw"; then
             echo "::error::desktop exe has no version resource (icon/metadata missing)"
             missing=1
           fi
