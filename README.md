@@ -155,6 +155,16 @@ ElasticClaw Server owns policy. Providers own compute. OpenClaw owns the coding 
 
 ## Documentation
 
+This fork adds a Windows desktop application. Its documentation lives in the repo,
+because it covers behaviour specific to this fork:
+
+- [Windows desktop app](docs/DESKTOP_APP.md) — install, file locations, providers,
+  browser previews, and how a run progresses stage by stage
+- [Troubleshooting](docs/TROUBLESHOOTING.md) — diagnosed failures with their real
+  symptoms; start here when a run stalls, a PR is not watched, or a preview never appears
+
+Upstream documentation:
+
 - [Overview](https://elasticclaw.ai/docs)
 - [Installation](https://elasticclaw.ai/docs/installation)
 - [Workspaces](https://elasticclaw.ai/docs/workspaces)
