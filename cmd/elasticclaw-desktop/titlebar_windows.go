@@ -3,6 +3,7 @@
 package main
 
 import (
+	"os"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -58,4 +59,57 @@ func applyBrandTitleBar(hwnd unsafe.Pointer) {
 	// #09090b — the same near-black the dashboard and the app icon use.
 	set(dwmwaCaptionColor, colorRef(0x09, 0x09, 0x0b))
 	set(dwmwaBorderColor, colorRef(0x27, 0x27, 0x2a))
+}
+
+// applyWindowIcon puts the app's own icon in the title bar and Alt-Tab.
+//
+// go-webview2 registers its window class without an icon, so Windows falls back to
+// the generic application glyph — a grey window shape that looks like a missing
+// asset sitting above a branded UI. The icon is pulled from this executable's own
+// resource, so it is always the same artwork the taskbar and Start menu use.
+func applyWindowIcon(hwnd unsafe.Pointer) {
+	if hwnd == nil {
+		return
+	}
+	exe, err := windows.UTF16PtrFromString(currentExecutablePath())
+	if err != nil {
+		return
+	}
+
+	shell32 := windows.NewLazySystemDLL("shell32.dll")
+	extract := shell32.NewProc("ExtractIconExW")
+
+	var large, small uintptr
+	// Index 0 is the first icon group in the binary, which is the one goversioninfo
+	// embedded. A zero count means there is no icon to set, so leave the default.
+	ret, _, _ := extract.Call(
+		uintptr(unsafe.Pointer(exe)), 0,
+		uintptr(unsafe.Pointer(&large)),
+		uintptr(unsafe.Pointer(&small)),
+		1,
+	)
+	if ret == 0 || (large == 0 && small == 0) {
+		return
+	}
+
+	const (
+		wmSetIcon = 0x0080
+		iconSmall = 0
+		iconBig   = 1
+	)
+	send := windows.NewLazySystemDLL("user32.dll").NewProc("SendMessageW")
+	if big := large; big != 0 {
+		send.Call(uintptr(hwnd), wmSetIcon, iconBig, big)
+	}
+	if sm := small; sm != 0 {
+		send.Call(uintptr(hwnd), wmSetIcon, iconSmall, sm)
+	}
+}
+
+func currentExecutablePath() string {
+	p, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return p
 }

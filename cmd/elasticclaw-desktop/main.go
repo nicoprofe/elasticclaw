@@ -102,6 +102,7 @@ func main() {
 
 	// Paint the caption in the app's colours rather than the user's accent colour.
 	applyBrandTitleBar(w.Window())
+	applyWindowIcon(w.Window())
 
 	w.Navigate(url)
 	w.Run() // blocks until the user closes the window
