@@ -46,6 +46,12 @@ type IssueLabelsSkip struct {
 type Trigger struct {
 	// MessageContains matches when a claw message contains this substring.
 	MessageContains string `yaml:"message_contains"`
+	// MessageLineEquals matches when a whole line of a claw message equals this
+	// value. Marker-driven stages need this rather than MessageContains: an agent
+	// planning its work naturally writes the marker in prose ("when the tests pass
+	// I'll say [READY_TO_TEST]"), and a substring match fires the transition on
+	// that sentence, before any work is done.
+	MessageLineEquals string `yaml:"message_line_equals"`
 	// PRMerged is true when the pr_merged key is present in the YAML (even with null value).
 	PRMerged bool
 	// PRClosed is true when the pr_closed key is present in the YAML (even with null value).
@@ -125,6 +131,8 @@ func (t *Trigger) UnmarshalYAML(value *yaml.Node) error {
 		switch key {
 		case "message_contains":
 			t.MessageContains = val.Value
+		case "message_line_equals":
+			t.MessageLineEquals = val.Value
 		case "pr_merged":
 			// Presence of the key (even with null/empty/false value) means true
 			t.PRMerged = true
@@ -186,9 +194,30 @@ func (t *Trigger) UnmarshalYAML(value *yaml.Node) error {
 				}
 			}
 			t.OutputMatches = &om
+		default:
+			// Reject rather than ignore. This switch used to fall through silently,
+			// so a trigger whose key was misspelled or unsupported parsed into an
+			// empty Trigger that could never fire. The stage it guarded became
+			// unreachable and the run sat in the previous stage looking like a hang,
+			// with nothing logged and nothing shown in the UI. A config error must
+			// surface when the workflow is loaded, not as a stalled agent an hour later.
+			return fmt.Errorf("line %d: unknown trigger %q (supported: message_contains, "+
+				"message_line_equals, pr_merged, pr_closed, pr_conditions, judge_verdict, "+
+				"gate_result, output_matches)", value.Content[i].Line, key)
 		}
 	}
+	if t.isEmpty() {
+		return fmt.Errorf("line %d: trigger has no condition, so the stage it guards can never be entered", value.Line)
+	}
 	return nil
+}
+
+// isEmpty reports whether no condition was set, which would make the trigger
+// dead weight rather than a transition.
+func (t *Trigger) isEmpty() bool {
+	return t.MessageContains == "" && t.MessageLineEquals == "" &&
+		!t.PRMerged && !t.PRClosed && t.PRConditions == nil &&
+		t.JudgeVerdict == "" && t.GateResult == nil && t.OutputMatches == nil
 }
 
 // MoveIssueAction specifies the target status and optional explicit issue ID
@@ -486,9 +515,39 @@ func (p *Pipeline) StageForMessageContains(message string) *Stage {
 			if t.MessageContains != "" && containsFold(message, t.MessageContains) {
 				return &p.Stages[i]
 			}
+			if t.MessageLineEquals != "" && hasLineEqual(message, t.MessageLineEquals) {
+				return &p.Stages[i]
+			}
 		}
 	}
 	return nil
+}
+
+// hasLineEqual reports whether any line of message equals want, ignoring case,
+// surrounding whitespace, and the markdown that agents habitually add.
+//
+// The marker is written by a language model, which will not reliably produce a
+// bare line: it arrives as `[READY_TO_TEST]` in backticks, or bolded, or with a
+// trailing period. Being strict about the exact bytes means the transition
+// silently does not happen, which is indistinguishable from a hung agent, so the
+// decorations agents actually emit are stripped before comparing.
+func hasLineEqual(message, want string) bool {
+	want = strings.TrimSpace(want)
+	for _, line := range strings.Split(message, "\n") {
+		if strings.EqualFold(normalizeMarkerLine(line), want) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeMarkerLine(line string) string {
+	line = strings.TrimSpace(line)
+	// Trailing sentence punctuation, then wrappers, then punctuation again: an
+	// agent writes both **[MARKER]** and `[MARKER].`
+	line = strings.TrimRight(line, ".:;! \t")
+	line = strings.Trim(line, "`*_ \t")
+	return strings.TrimRight(line, ".:;! \t")
 }
 
 // StageForPRMerged returns the first stage with a pr_merged trigger, or nil.
