@@ -64,6 +64,13 @@ type Server struct {
 	// gatewayRestartCounts retains the heartbeat counter across WebSocket reconnects.
 	gatewayRestartCounts map[string]int
 	lastTokenFailureLog  time.Time
+	// workspaceGitHubApps returns the GitHub Apps owned by workspaces, which live
+	// on disk rather than in hub.yaml. It is a field rather than a direct call so
+	// that a Server built in a test reads no home directory and makes no network
+	// call: an earlier version read $HOME unconditionally, and the package's tests
+	// picked up the developer's own App and hit the real GitHub API with it.
+	// NewServer installs the real loader; a nil loader means hub.yaml only.
+	workspaceGitHubApps func() []*types.GitHubAppConfig
 	// one-time oauth_code -> signed GitHub session token
 
 	dependencyStatus *dependencyStatusService
@@ -287,6 +294,10 @@ func NewServer(addr, dbPath, identityDir string, hubCfg *types.HubConfig) (*Serv
 	if srv.livenessEnabled() {
 		srv.reconcileOnBoot()
 	}
+
+	// Apps created through the setup flow belong to a workspace and live on disk, so
+	// the PR watcher needs a way to reach them beyond hub.yaml.
+	srv.workspaceGitHubApps = srv.loadWorkspaceGitHubAppsFromDisk
 
 	// Start background poller to keep provider VM status fresh
 	go srv.pollProviderStatus()

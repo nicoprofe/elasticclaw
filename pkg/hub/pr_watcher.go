@@ -441,13 +441,11 @@ func (s *Server) firePRConditions(pr clawPR, stage pipeline.Stage, ctx pipelineC
 // resolveGitHubTokenWithRepos is a shared helper that resolves a GitHub App installation token
 // with optional repo-scoped access.
 func (s *Server) resolveGitHubTokenWithRepos(repoAccess []RepoAccess) string {
-	s.mu.RLock()
-	cfg := s.hubCfg
-	s.mu.RUnlock()
-	if len(cfg.GitHubApps) == 0 {
+	apps := s.githubAppsForTokenResolution()
+	if len(apps) == 0 {
 		return ""
 	}
-	for _, appCfg := range cfg.GitHubApps {
+	for _, appCfg := range apps {
 		provider, err := NewGitHubTokenProvider(appCfg)
 		if err != nil {
 			log.Printf("[pr-watcher] CRITICAL: GitHub token provider setup failed: %v", err)
@@ -455,12 +453,74 @@ func (s *Server) resolveGitHubTokenWithRepos(repoAccess []RepoAccess) string {
 		}
 		token, _, err := provider.InstallationToken(context.Background(), 0, repoAccess)
 		if err != nil {
-			log.Printf("[pr-watcher] CRITICAL: GitHub token provider failed: %v", err)
+			// Expected when several Apps are configured and only one is installed on
+			// the repo being asked about, so this is not on its own a failure.
+			log.Printf("[pr-watcher] app_id=%d: no token for requested repos (trying next): %v", appCfg.AppID, err)
 			continue
 		}
 		return token
 	}
 	return ""
+}
+
+// githubAppsForTokenResolution returns every GitHub App the hub can authenticate
+// as: the ones in hub.yaml plus the ones each workspace owns.
+//
+// The watcher used to read hub.yaml alone. Apps created through the setup flow are
+// written per workspace instead, which is the arrangement that lets one hub serve
+// several repositories with an App each — so on a hub configured that way there
+// were no Apps at all as far as this function was concerned. It returned an empty
+// token, and the poll loop treats an empty token as fatal and returns, meaning no
+// tracked pull request was ever polled: no CI failures relayed, no review comments
+// delivered, and no pr_merged or pr_closed transition could fire, leaving pipelines
+// parked in review forever. The agent side never noticed because the credential
+// helper endpoint merges workspace Apps already; only the watcher did not.
+func (s *Server) githubAppsForTokenResolution() []*types.GitHubAppConfig {
+	s.mu.RLock()
+	apps := append([]*types.GitHubAppConfig(nil), s.hubCfg.GitHubApps...)
+	loader := s.workspaceGitHubApps
+	s.mu.RUnlock()
+
+	if loader == nil {
+		return apps
+	}
+
+	seen := make(map[int64]bool, len(apps))
+	for _, app := range apps {
+		seen[app.AppID] = true
+	}
+	for _, app := range loader() {
+		// The same App may be attached to more than one workspace; asking GitHub for
+		// the same installation token twice per poll is pure waste.
+		if app == nil || seen[app.AppID] {
+			continue
+		}
+		seen[app.AppID] = true
+		apps = append(apps, app)
+	}
+	return apps
+}
+
+// loadWorkspaceGitHubAppsFromDisk collects the GitHub Apps every workspace owns.
+// This is the production loader installed by NewServer.
+func (s *Server) loadWorkspaceGitHubAppsFromDisk() []*types.GitHubAppConfig {
+	workspaces, err := s.loadAllWorkspaces()
+	if err != nil {
+		log.Printf("[pr-watcher] listing workspaces for GitHub App lookup: %v", err)
+		return nil
+	}
+	var apps []*types.GitHubAppConfig
+	for _, ws := range workspaces {
+		if ws == nil || strings.TrimSpace(ws.Name) == "" {
+			continue
+		}
+		workspaceApps, err := loadWorkspaceGitHubAppConfigs(ws.Name)
+		if err != nil {
+			continue
+		}
+		apps = append(apps, workspaceApps...)
+	}
+	return apps
 }
 
 // resolveGitHubTokenForRepo returns a GitHub App installation token scoped to the given repo.
