@@ -68,12 +68,17 @@ build() {
     -o "${OUTPUT_DIR}/${asset}" .
 }
 
-build linux   amd64 elasticclaw-linux-amd64
-build linux   arm64 elasticclaw-linux-arm64
-build darwin  amd64 elasticclaw-darwin-amd64
-build darwin  arm64 elasticclaw-darwin-arm64
-build windows amd64 elasticclaw-windows-amd64.exe
-build windows arm64 elasticclaw-windows-arm64.exe
+# DESKTOP_TARGET is set by the per-platform CI jobs, which need only their own cgo
+# desktop binary. Rebuilding the whole cross-compilable set there wastes several
+# minutes and produces artifacts the job then does not upload.
+if [[ -z "${DESKTOP_TARGET:-}" ]]; then
+  build linux   amd64 elasticclaw-linux-amd64
+  build linux   arm64 elasticclaw-linux-arm64
+  build darwin  amd64 elasticclaw-darwin-amd64
+  build darwin  arm64 elasticclaw-darwin-arm64
+  build windows amd64 elasticclaw-windows-amd64.exe
+  build windows arm64 elasticclaw-windows-arm64.exe
+fi
 
 # The native Windows desktop app: a Win32 window hosting WebView2, no browser.
 # Names must differ from the CLI by more than case: GitHub release asset names are
@@ -153,10 +158,12 @@ build_desktop_linux() {
     -o "${OUTPUT_DIR}/${asset}" ./cmd/elasticclaw-desktop/
 }
 
-build_windows_resource
+if [[ -z "${DESKTOP_TARGET:-}" ]]; then
+  build_windows_resource
 
-build_desktop amd64 elasticclaw-desktop-windows-amd64.exe
-build_desktop arm64 elasticclaw-desktop-windows-arm64.exe
+  build_desktop amd64 elasticclaw-desktop-windows-amd64.exe
+  build_desktop arm64 elasticclaw-desktop-windows-arm64.exe
+fi
 
 # DESKTOP_TARGET lets the per-platform CI jobs ask for just their own artifact.
 # Unset means "the cross-compilable set", which is what the main release job wants.
@@ -174,16 +181,44 @@ esac
 
 # claw-bridge runs inside sandboxes (always linux/amd64) and is downloaded by
 # the hub at run time — it must ship in the same release as the hub binary.
-echo "→ claw-bridge-linux-amd64"
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-  go build -trimpath -ldflags "$LDFLAGS" \
-  -o "${OUTPUT_DIR}/claw-bridge-linux-amd64" ./cmd/claw-bridge/
+if [[ -z "${DESKTOP_TARGET:-}" ]]; then
+  echo "→ claw-bridge-linux-amd64"
+  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -trimpath -ldflags "$LDFLAGS" \
+    -o "${OUTPUT_DIR}/claw-bridge-linux-amd64" ./cmd/claw-bridge/
+fi
 
 # ── Checksums ─────────────────────────────────────────────────────────────────
-# `elasticclaw upgrade` refuses to install an artifact absent from this file.
+# `elasticclaw upgrade` refuses to install an artifact absent from this file, and
+# both installer scripts verify against it before running anything.
+#
+# macOS has no sha256sum and Linux has no shasum, and `sed -i` takes an argument on
+# BSD sed but not GNU sed. This script now runs on both, so neither may be assumed.
+sha256_all() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$@"
+  else
+    shasum -a 256 "$@"
+  fi
+}
+
+if [[ -n "${DESKTOP_TARGET:-}" ]]; then
+  echo
+  echo "✓ ${DESKTOP_TARGET} desktop artifacts in ${OUTPUT_DIR}/ (checksums are regenerated release-wide)"
+  ls -lh "$OUTPUT_DIR"
+  exit 0
+fi
+
 echo
 echo "→ checksums.txt"
-(cd "$OUTPUT_DIR" && sha256sum ./* > checksums.txt && sed -i 's| \./| |' checksums.txt)
+(
+  cd "$OUTPUT_DIR"
+  # Name the files explicitly rather than globbing ./*, so the output has no "./"
+  # prefix to strip afterwards and checksums.txt cannot hash itself.
+  files=$(ls | grep -v '^checksums.txt$')
+  # shellcheck disable=SC2086
+  sha256_all $files > checksums.txt
+)
 
 echo
 echo "✓ Release artifacts in ${OUTPUT_DIR}/"
