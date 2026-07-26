@@ -4,6 +4,7 @@ export interface Claw {
   id: string
   name: string
   template: string
+  provider?: string
   status: ClawStatus
   uptime: number // in seconds, computed from created_at
   unreadCount: number
@@ -69,6 +70,7 @@ export interface ApiClaw {
   id: string
   name: string
   template: string
+  provider?: string
   status: "connected" | "offline" | "provisioning" | "starting" | "preview" | "error" | "idle"
   last_seen: string
   created_at: string

@@ -23,7 +23,9 @@ type CreateRequest struct {
 
 	// Base image or scratch config
 	FromImage   string
+	Image       string
 	FromScratch *ScratchConfig
+	Resources   TemplateResources
 
 	// Template files to inject
 	TemplateFiles map[string][]byte
@@ -36,6 +38,9 @@ type CreateRequest struct {
 
 	// PreviewPorts are application ports that should be exposed for browser QA.
 	PreviewPorts []int
+	// PreviewTTLSeconds bounds provider-issued preview credentials. A zero value
+	// leaves the provider's default in place.
+	PreviewTTLSeconds int64
 }
 
 // ScratchConfig for creating from a base distro

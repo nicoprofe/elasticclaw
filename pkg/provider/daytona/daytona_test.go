@@ -37,6 +37,66 @@ func TestBuildOpenClawEnvFileIncludesWorkflowSecrets(t *testing.T) {
 	}
 }
 
+func TestResolveDaytonaConfigUsesExplicitValues(t *testing.T) {
+	env := map[string]string{
+		"DAYTONA_API_KEY": "environment-key",
+		"DAYTONA_API_URL": "https://environment.example",
+		"DAYTONA_TARGET":  "environment-target",
+	}
+	cfg, err := resolveDaytonaConfig(map[string]interface{}{
+		"api_key": "configured-key",
+		"api_url": "https://configured.example",
+		"target":  "configured-target",
+	}, func(key string) string { return env[key] })
+	if err != nil {
+		t.Fatalf("resolveDaytonaConfig: %v", err)
+	}
+	if cfg.APIKey != "configured-key" || cfg.APIUrl != "https://configured.example" || cfg.Target != "configured-target" {
+		t.Fatalf("resolved config = %#v", cfg)
+	}
+}
+
+func TestResolveDaytonaConfigFallsBackToEnvironment(t *testing.T) {
+	env := map[string]string{
+		"DAYTONA_API_KEY": "environment-key",
+		"DAYTONA_API_URL": "https://environment.example",
+		"DAYTONA_TARGET":  "environment-target",
+	}
+	cfg, err := resolveDaytonaConfig(nil, func(key string) string { return env[key] })
+	if err != nil {
+		t.Fatalf("resolveDaytonaConfig: %v", err)
+	}
+	if cfg.APIKey != env["DAYTONA_API_KEY"] || cfg.APIUrl != env["DAYTONA_API_URL"] || cfg.Target != env["DAYTONA_TARGET"] {
+		t.Fatalf("resolved config = %#v", cfg)
+	}
+}
+
+func TestResolveDaytonaConfigRequiresAPIKey(t *testing.T) {
+	if _, err := resolveDaytonaConfig(nil, func(string) string { return "" }); err == nil {
+		t.Fatal("expected missing API key error")
+	}
+}
+
+func TestDaytonaResourcesParsesWorkspaceValues(t *testing.T) {
+	resources, err := daytonaResources(providertypes.TemplateResources{
+		CPU:    "2",
+		Memory: "4GB",
+		Disk:   "10GiB",
+	})
+	if err != nil {
+		t.Fatalf("daytonaResources: %v", err)
+	}
+	if resources.CPU != 2 || resources.Memory != 4 || resources.Disk != 10 {
+		t.Fatalf("resources = %#v", resources)
+	}
+}
+
+func TestDaytonaResourcesRejectsInvalidValues(t *testing.T) {
+	if _, err := daytonaResources(providertypes.TemplateResources{Memory: "large"}); err == nil {
+		t.Fatal("expected invalid memory error")
+	}
+}
+
 func TestBuildStartOpenClawCommandQuotesWorkdir(t *testing.T) {
 	workdir := `/tmp/a'; touch /tmp/pwned; #'`
 

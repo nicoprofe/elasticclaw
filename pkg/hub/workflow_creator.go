@@ -191,6 +191,9 @@ func (s *Server) createClawFromWorkflowWithOptions(workspace *types.WorkspaceCon
 
 	var (
 		instanceType    string
+		image           string
+		snapshot        string
+		resources       types.TemplateResources
 		llmKey          string
 		nixEnabled      int
 		dockerEnabled   int
@@ -214,6 +217,9 @@ func (s *Server) createClawFromWorkflowWithOptions(workspace *types.WorkspaceCon
 	}
 	if tmplCfg != nil {
 		instanceType = tmplCfg.InstanceType
+		image = tmplCfg.Image
+		snapshot = tmplCfg.Snapshot
+		resources = tmplCfg.Resources
 		llmKey = tmplCfg.LLMKey
 		if tmplCfg.DefaultModel != "" {
 			defaultModel = tmplCfg.DefaultModel
@@ -332,16 +338,20 @@ func (s *Server) createClawFromWorkflowWithOptions(workspace *types.WorkspaceCon
 
 	providerTemplateFiles := workspaceTemplateFiles(templateFiles)
 	req := types.CreateClawRequest{
-		Name:         clawName,
-		TemplateName: workspace.Name,
-		Provider:     provider,
-		DefaultModel: defaultModel,
-		LLMKey:       llmKey,
-		Files:        providerTemplateFiles,
-		Env:          env,
-		InstanceType: instanceType,
-		ProviderName: "ec-" + clawID[:8],
-		PreviewPort:  workflowPreviewPort(workflow),
+		Name:              clawName,
+		TemplateName:      workspace.Name,
+		Provider:          provider,
+		DefaultModel:      defaultModel,
+		LLMKey:            llmKey,
+		Files:             providerTemplateFiles,
+		Env:               env,
+		InstanceType:      instanceType,
+		Image:             image,
+		Snapshot:          snapshot,
+		Resources:         resources,
+		ProviderName:      "ec-" + clawID[:8],
+		PreviewPort:       workflowPreviewPort(workflow),
+		PreviewTTLSeconds: workflowPreviewTTLSeconds(workflow),
 	}
 	fileBytes := make(map[string][]byte, len(providerTemplateFiles))
 	for k, v := range providerTemplateFiles {
@@ -422,7 +432,16 @@ func appendWorkflowPreviewContext(existing string, preview *types.WorkflowPrevie
 		b.WriteString("\n\n")
 	}
 	b.WriteString("## Browser Preview Required\n\n")
-	b.WriteString(fmt.Sprintf("After implementation and focused tests pass and the pull request is open, start the repository's application on port %d for browser QA before sending `[DONE]`.\n", preview.Port))
+	// Do not tie this to [DONE]. The only workflow shipped with previews ends that
+	// way, but a workflow with a test gate ends its work by announcing its own
+	// marker — [PR_OPENED] for instance — and then waits in a review stage. An
+	// agent told to preview "before sending [DONE]" in such a workflow never sends
+	// [DONE], so it opened the pull request, reported it, and stopped: the port was
+	// published and the URL allocated, but nothing ever marked the preview ready.
+	// The trigger the agent can always recognise is its own pull request being open.
+	b.WriteString(fmt.Sprintf("As soon as implementation and focused tests pass and the pull request is open, start the repository's application on port %d for browser QA.\n", preview.Port))
+	b.WriteString("Do this regardless of which completion marker this workflow asks you for; the pull request being open is the trigger, not any particular marker.\n")
+	b.WriteString("Order matters. Announce this workflow's completion marker first, then mark the preview ready as your final action, because marking it ready ends your involvement: if you mark it ready first you will be stopped before announcing the marker and the workflow will never advance past its current stage.\n")
 	b.WriteString("Discover and use the repository's own documented start command and package manager; do not invent or replace its tooling.\n")
 	b.WriteString(fmt.Sprintf("Configure the application to bind to `0.0.0.0:%d`. Do not launch it directly as a background child of a tool call because tool subprocesses may be reaped.\n", preview.Port))
 	b.WriteString("Ask ElasticClaw to own the persistent process by POSTing JSON to the preview start endpoint. The JSON fields are `cwd` (the absolute repository directory) and `command` (the discovered foreground start command):\n")

@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,30 +47,9 @@ func buildOpenClawEnvFile(env map[string]string) ([]byte, error) {
 
 // New creates a new Daytona provider
 func New(config map[string]interface{}) (*Provider, error) {
-	apiKey := os.Getenv("DAYTONA_API_KEY")
-	if config != nil {
-		if key, ok := config["api_key"].(string); ok && key != "" {
-			apiKey = key
-		}
-	}
-
-	if apiKey == "" {
-		return nil, fmt.Errorf("DAYTONA_API_KEY not set - get one at https://app.daytona.io/dashboard/keys")
-	}
-
-	// Create client with config
-	cfg := &daytonatypes.DaytonaConfig{
-		APIKey: apiKey,
-	}
-
-	// Check for custom API URL
-	if apiURL := os.Getenv("DAYTONA_API_URL"); apiURL != "" {
-		cfg.APIUrl = apiURL
-	}
-
-	// Check for target region
-	if target := os.Getenv("DAYTONA_TARGET"); target != "" {
-		cfg.Target = target
+	cfg, err := resolveDaytonaConfig(config, os.Getenv)
+	if err != nil {
+		return nil, err
 	}
 
 	client, err := daytona.NewClientWithConfig(cfg)
@@ -79,7 +59,34 @@ func New(config map[string]interface{}) (*Provider, error) {
 
 	return &Provider{
 		client: client,
-		apiKey: apiKey,
+		apiKey: cfg.APIKey,
+	}, nil
+}
+
+func resolveDaytonaConfig(config map[string]interface{}, getenv func(string) string) (*daytonatypes.DaytonaConfig, error) {
+	apiKey := getenv("DAYTONA_API_KEY")
+	apiURL := getenv("DAYTONA_API_URL")
+	target := getenv("DAYTONA_TARGET")
+	if config != nil {
+		if key, ok := config["api_key"].(string); ok && key != "" {
+			apiKey = key
+		}
+		if value, ok := config["api_url"].(string); ok && value != "" {
+			apiURL = value
+		}
+		if value, ok := config["target"].(string); ok && value != "" {
+			target = value
+		}
+	}
+
+	if apiKey == "" {
+		return nil, fmt.Errorf("DAYTONA_API_KEY not set - get one at https://app.daytona.io/dashboard/keys")
+	}
+
+	return &daytonatypes.DaytonaConfig{
+		APIKey: apiKey,
+		APIUrl: apiURL,
+		Target: target,
 	}, nil
 }
 
@@ -94,14 +101,27 @@ func (p *Provider) Info() types.ProviderInfo {
 
 // Create provisions a new sandbox
 func (p *Provider) Create(ctx context.Context, req types.CreateRequest) (*types.Instance, error) {
-	// Create sandbox params - use SnapshotParams for default snapshot-based creation.
-	// req.FromImage maps to the Daytona snapshot name (e.g. "daytona-medium").
-	params := daytonatypes.SnapshotParams{
-		SandboxBaseParams: daytonatypes.SandboxBaseParams{
-			Name:    req.Name,
-			EnvVars: req.Env,
-		},
-		Snapshot: req.FromImage, // snapshot name — empty string uses Daytona default
+	baseParams := daytonatypes.SandboxBaseParams{
+		Name:    req.Name,
+		EnvVars: req.Env,
+	}
+	var params any
+	if req.Image != "" {
+		resources, err := daytonaResources(req.Resources)
+		if err != nil {
+			return nil, err
+		}
+		params = daytonatypes.ImageParams{
+			SandboxBaseParams: baseParams,
+			Image:             req.Image,
+			Resources:         resources,
+		}
+	} else {
+		// req.FromImage maps to the Daytona snapshot name (e.g. "daytona-medium").
+		params = daytonatypes.SnapshotParams{
+			SandboxBaseParams: baseParams,
+			Snapshot:          req.FromImage, // empty string uses Daytona default
+		}
 	}
 
 	// Create the sandbox
@@ -139,8 +159,12 @@ func (p *Provider) Create(ctx context.Context, req types.CreateRequest) (*types.
 	}
 
 	providerMeta := map[string]string{"sandbox_id": sandbox.ID}
+	previewTTLSeconds := int((24 * time.Hour) / time.Second)
+	if req.PreviewTTLSeconds > 0 {
+		previewTTLSeconds = int(req.PreviewTTLSeconds)
+	}
 	for _, port := range req.PreviewPorts {
-		preview, err := sandbox.GetSignedPreviewLink(ctx, port, 24*60*60)
+		preview, err := sandbox.GetSignedPreviewLink(ctx, port, previewTTLSeconds)
 		if err != nil {
 			_ = sandbox.Delete(context.Background())
 			return nil, fmt.Errorf("failed to expose preview port %d: %w", port, err)
@@ -156,6 +180,39 @@ func (p *Provider) Create(ctx context.Context, req types.CreateRequest) (*types.
 		CreatedAt:    time.Now().UTC(),
 		ProviderMeta: providerMeta,
 	}, nil
+}
+
+func daytonaResources(resources types.TemplateResources) (*daytonatypes.Resources, error) {
+	if resources.CPU == "" && resources.Memory == "" && resources.Disk == "" {
+		return nil, nil
+	}
+	cpu, err := parseDaytonaResource(resources.CPU, "cpu")
+	if err != nil {
+		return nil, err
+	}
+	memory, err := parseDaytonaResource(resources.Memory, "memory")
+	if err != nil {
+		return nil, err
+	}
+	disk, err := parseDaytonaResource(resources.Disk, "disk")
+	if err != nil {
+		return nil, err
+	}
+	return &daytonatypes.Resources{CPU: cpu, Memory: memory, Disk: disk}, nil
+}
+
+func parseDaytonaResource(value, name string) (int, error) {
+	value = strings.TrimSpace(strings.ToUpper(value))
+	value = strings.TrimSuffix(value, "GIB")
+	value = strings.TrimSuffix(value, "GB")
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("invalid Daytona %s resource %q", name, value)
+	}
+	return parsed, nil
 }
 
 func getDir(path string) string {

@@ -3576,11 +3576,14 @@ func (s *Server) provisionDaytona(ctx context.Context, clawID string, req types.
 		snapshot = cfg.DefaultSnapshot
 	}
 	createReq := types.CreateRequest{
-		Name:          req.ProviderName, // stable ec-<shortid>, decoupled from display name
-		FromImage:     snapshot,
-		TemplateFiles: files,
-		Env:           env,
-		PreviewPorts:  previewPorts(req.PreviewPort),
+		Name:              req.ProviderName, // stable ec-<shortid>, decoupled from display name
+		FromImage:         snapshot,
+		Image:             req.Image,
+		Resources:         req.Resources,
+		TemplateFiles:     files,
+		Env:               env,
+		PreviewPorts:      previewPorts(req.PreviewPort),
+		PreviewTTLSeconds: req.PreviewTTLSeconds,
 	}
 	instance, err := createAndConfigureDaytonaSandbox(ctx, p, createReq, env, func(created *types.Instance) error {
 		if _, err := s.db.Exec(`UPDATE claws SET status='starting', provider='daytona', provider_id=?, preview_url=? WHERE id=?`, created.ID, instancePreviewURL(created, req.PreviewPort), clawID); err != nil {

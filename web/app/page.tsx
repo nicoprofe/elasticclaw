@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect, useCallback, useRef } from "react"
+import { useState, useMemo, useEffect, useCallback, useRef, useSyncExternalStore } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { ConversationView } from "@/components/conversation-view"
 import { SetupScreen } from "@/components/setup-screen"
@@ -11,18 +11,31 @@ import type { Message } from "@/lib/types"
 import { isConfigured, type Workflow } from "@/lib/api"
 import { requestAuthToken } from "@/lib/auth-storage"
 
+const subscribeToBrowserState = () => () => {}
+const getStoredSelectedClawId = () => localStorage.getItem("elasticclaw_selected_claw")
+const getConfiguredState = () => isConfigured()
+const getNullServerSnapshot = () => null
+
 export default function Home() {
-  const [selectedClawId, setSelectedClawId] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null
-    return localStorage.getItem('elasticclaw_selected_claw') ?? null
-  })
+  const storedSelectedClawId = useSyncExternalStore(
+    subscribeToBrowserState,
+    getStoredSelectedClawId,
+    getNullServerSnapshot,
+  )
+  const [selectedClawOverride, setSelectedClawId] = useState<string | null | undefined>(undefined)
+  const selectedClawId = selectedClawOverride === undefined
+    ? storedSelectedClawId
+    : selectedClawOverride
   const [searchQuery, setSearchQuery] = useState("")
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [configuredState, setConfiguredState] = useState<boolean | null>(() => {
-    if (typeof window === "undefined") return null
-    return isConfigured()
-  })
+  const storedConfiguredState = useSyncExternalStore(
+    subscribeToBrowserState,
+    getConfiguredState,
+    getNullServerSnapshot,
+  )
+  const [configuredOverride, setConfiguredState] = useState<boolean | undefined>(undefined)
+  const configuredState = configuredOverride ?? storedConfiguredState
   const [isAdmin, setIsAdmin] = useState(false)
   const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(null)
 

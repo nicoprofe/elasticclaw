@@ -831,6 +831,8 @@ type CreateClawRequest struct {
 	ProviderName string `json:"provider_name,omitempty"`
 	// PreviewPort is set by workflow configuration for an ephemeral browser preview.
 	PreviewPort int `json:"preview_port,omitempty"`
+	// PreviewTTLSeconds is the validated workflow preview lifetime.
+	PreviewTTLSeconds int64 `json:"preview_ttl_seconds,omitempty"`
 }
 
 // GetVersion returns the effective schema version for this hub config.

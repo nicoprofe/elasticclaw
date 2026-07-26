@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { ActivitySummary as ActivitySummaryMeta, Claw, DependencyStatus, Message, ClawStatus } from "@/lib/types"
 import { getTerminalWsUrl, fetchActivityMessages, fetchClawPRs, type ClawPR } from "@/lib/api"
@@ -132,45 +133,67 @@ function ContextProgressBar({ usage, size = "sm" }: { usage: number; size?: "sm"
 
   if (size === "lg") {
     return (
-      <div className="group relative flex items-center">
-        <div 
-          className={cn(
-            "h-1.5 group-hover:h-3 rounded-full transition-all duration-200 overflow-hidden",
-            "w-24 group-hover:w-32",
-            getBgColor(usage)
-          )}
-        >
-          <div 
-            className={cn("h-full rounded-full transition-all", getColor(usage))}
-            style={{ width: `${usage}%` }}
-          />
-        </div>
-        <span className="ml-2 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity font-mono">
-          {usage}%
-        </span>
-      </div>
+      <Tooltip delayDuration={500}>
+        <TooltipTrigger asChild>
+          <div
+            className="group relative flex items-center rounded-full focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            aria-label={`Context ${usage}%`}
+            tabIndex={0}
+          >
+            <div
+              className={cn(
+                "h-1.5 group-hover:h-3 rounded-full transition-all duration-200 overflow-hidden",
+                "w-24 group-hover:w-32",
+                getBgColor(usage)
+              )}
+            >
+              <div
+                className={cn("h-full rounded-full transition-all", getColor(usage))}
+                style={{ width: `${usage}%` }}
+              />
+            </div>
+            <span className="ml-2 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity font-mono">
+              {usage}%
+            </span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6}>
+          Context {usage}%
+        </TooltipContent>
+      </Tooltip>
     )
   }
 
   return (
-    <div className="group relative">
-      <div 
-        className={cn(
-          "h-1 group-hover:h-2.5 rounded-full transition-all duration-200 overflow-hidden w-full",
-          getBgColor(usage)
-        )}
-      >
-        <div 
-          className={cn("h-full rounded-full transition-all", getColor(usage))}
-          style={{ width: `${usage}%` }}
-        />
-      </div>
-      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-        <span className="text-[9px] font-mono font-medium text-foreground drop-shadow-sm">
-          {usage}%
-        </span>
-      </div>
-    </div>
+    <Tooltip delayDuration={500}>
+      <TooltipTrigger asChild>
+        <div
+          className="group relative rounded-full focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          aria-label={`Context ${usage}%`}
+          tabIndex={0}
+        >
+          <div
+            className={cn(
+              "h-1 group-hover:h-2.5 rounded-full transition-all duration-200 overflow-hidden w-full",
+              getBgColor(usage)
+            )}
+          >
+            <div
+              className={cn("h-full rounded-full transition-all", getColor(usage))}
+              style={{ width: `${usage}%` }}
+            />
+          </div>
+          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <span className="text-[9px] font-mono font-medium text-foreground drop-shadow-sm">
+              {usage}%
+            </span>
+          </div>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={6}>
+        Context {usage}%
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

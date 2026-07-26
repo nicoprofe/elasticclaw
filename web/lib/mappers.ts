@@ -100,6 +100,7 @@ export function mapApiClaw(
     id: apiClaw.id,
     name: apiClaw.name,
     template: apiClaw.template,
+    provider: overrides.provider ?? apiClaw.provider,
     status: overrides.status ?? mapApiStatus(apiClaw.status),
     uptime: overrides.uptime ?? computeUptime(apiClaw),
     unreadCount: overrides.unreadCount ?? 0,

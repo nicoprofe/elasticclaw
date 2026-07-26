@@ -77,6 +77,22 @@ function isUnhelpfulActivity(activity: AgentActivity): boolean {
   return activity.kind === "still_working" || Boolean(activity.message?.startsWith("No streamed output")) || Boolean(activity.error?.startsWith("No streamed output"))
 }
 
+const TERMINAL_ACTIVITY_PHASES = new Set(["completed", "failed", "cancelled", "canceled", "error", "errored"])
+
+function activityIsStreaming(activity: AgentActivity): boolean {
+  return !TERMINAL_ACTIVITY_PHASES.has(activity.phase?.toLowerCase() || "")
+}
+
+function timelineShowsSettledTurn(messages: Message[]): boolean {
+  const latestTurnSignal = [...messages].reverse().find((message) =>
+    message.role === "user" || message.role === "claw" || message.role === "activity"
+  )
+  if (!latestTurnSignal) return false
+  if (latestTurnSignal.role === "claw") return true
+  if (latestTurnSignal.role !== "activity" || !latestTurnSignal.activity) return false
+  return !activityIsStreaming(latestTurnSignal.activity)
+}
+
 function withoutModelWaitActivities(messages: Message[]): Message[] {
   return messages.filter((message) => message.activity?.kind !== "model_started")
 }
@@ -269,6 +285,17 @@ export function useHub(selectedClawId: string | null): HubState {
     try {
       const apiMsgs = await fetchMessageTimeline(clawId)
       const msgs = apiMsgs.map(mapApiMessage)
+
+      // A reconnect can miss the final WebSocket message that normally clears
+      // the typewriter. Reconcile against the canonical timeline so a recovered
+      // final reply or terminal activity cannot leave thinking dots behind.
+      if (timelineShowsSettledTurn(msgs)) {
+        clearTypewriter(clawId)
+        delete segmentedStreamRef.current[clawId]
+        setClaws((prev) =>
+          prev.map((c) => (c.id === clawId ? { ...c, isStreaming: false } : c))
+        )
+      }
       
       // Capture existing IDs before updating so we can diff outside the updater.
       // React 18 batches state updates — side effects inside updaters are unreliable.
@@ -304,7 +331,7 @@ export function useHub(selectedClawId: string | null): HubState {
     } catch (err) {
       console.warn(`Failed to load messages for ${clawId}:`, err)
     }
-  }, [persistMessages])
+  }, [clearTypewriter, persistMessages])
 
   const connectWebSocket = useCallback(() => {
     if (!shouldReconnectRef.current) return
@@ -413,7 +440,7 @@ export function useHub(selectedClawId: string | null): HubState {
           })
           setClaws((prev) =>
             prev.map((c) =>
-              c.id === clawId ? { ...c, isStreaming: true } : c
+              c.id === clawId ? { ...c, isStreaming: activityIsStreaming(activity) } : c
             )
           )
         } else if (type === "message") {

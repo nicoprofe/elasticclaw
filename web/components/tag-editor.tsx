@@ -8,11 +8,12 @@ import { patchClaw } from "@/lib/api"
 interface TagEditorProps {
   clawId: string
   tags: string[]
+  trailingTags?: string[]
   onTagsChange: (tags: string[]) => void
   className?: string
 }
 
-export function TagEditor({ clawId, tags, onTagsChange, className }: TagEditorProps) {
+export function TagEditor({ clawId, tags, trailingTags = [], onTagsChange, className }: TagEditorProps) {
   const [adding, setAdding] = useState(false)
   const [inputValue, setInputValue] = useState("")
   const [saving, setSaving] = useState(false)
@@ -95,6 +96,15 @@ export function TagEditor({ clawId, tags, onTagsChange, className }: TagEditorPr
           +{hiddenCount} more
         </span>
       )}
+      {trailingTags.map((tag) => (
+        <span
+          key={tag}
+          title={tag}
+          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-secondary text-muted-foreground rounded max-w-[120px]"
+        >
+          <span className="truncate">{tag}</span>
+        </span>
+      ))}
 
       {adding ? (
         <input

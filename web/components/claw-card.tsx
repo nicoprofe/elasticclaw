@@ -203,11 +203,12 @@ export function ClawCard({ claw, isSelected, onClick, onTogglePin, onTagsChange,
       <div className="min-w-0 max-w-[170px] overflow-hidden pl-5 pr-1">
         <BootstrapProgress claw={claw} variant="sidebar" />
       </div>
-      {(localTags.length > 0 || isSelected) && (
+      {(claw.provider || localTags.length > 0 || isSelected) && (
         <div className="mt-1.5 max-w-[170px] overflow-hidden pl-5 pr-1 flex items-start gap-2" onClick={(e) => e.stopPropagation()}>
           <TagEditor
             clawId={claw.id}
             tags={localTags}
+            trailingTags={claw.provider ? [`provider:${claw.provider}`] : []}
             onTagsChange={handleTagsChange}
           />
           {/* Color picker */}

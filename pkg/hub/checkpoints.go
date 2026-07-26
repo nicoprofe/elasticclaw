@@ -372,7 +372,9 @@ func (s *Server) provisionStoredClaw(clawID string) {
 	}
 	if tmplCfg != nil {
 		req.InstanceType = tmplCfg.InstanceType
+		req.Image = tmplCfg.Image
 		req.Snapshot = tmplCfg.Snapshot
+		req.Resources = tmplCfg.Resources
 		req.TTL = tmplCfg.TTL
 	}
 	ctx := context.Background()
