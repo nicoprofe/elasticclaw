@@ -34,27 +34,29 @@ type WorkspaceAccess struct {
 
 // WorkflowView is a workflow-shaped projection of a legacy factory.
 type WorkflowView struct {
-	Name                 string                 `json:"name"`
-	WorkspaceName        string                 `json:"workspaceName"`
-	Source               string                 `json:"source"`
-	Integration          string                 `json:"integration"`
-	IntegrationWorkspace string                 `json:"integrationWorkspace,omitempty"`
-	TriggerStatus        string                 `json:"triggerStatus,omitempty"`
-	DoneStatus           string                 `json:"doneStatus,omitempty"`
-	Projects             []string               `json:"projects,omitempty"`
-	Labels               []string               `json:"labels,omitempty"`
-	ExcludeLabels        []string               `json:"exclude_labels,omitempty"`
-	AssignedTo           string                 `json:"assignedTo,omitempty"`
-	Enabled              bool                   `json:"enabled"`
-	HasWebhookSecret     bool                   `json:"hasWebhookSecret"`
-	WebhookSecretRef     string                 `json:"webhookSecretRef,omitempty"`
-	PipelineYAML         string                 `json:"pipelineYAML,omitempty"`
-	EnableManualTrigger  bool                   `json:"enableManualTrigger,omitempty"`
-	SecretRefs           map[string]string      `json:"secretRefs,omitempty"`
-	Volumes              []types.WorkflowVolume `json:"volumes,omitempty"`
-	Environment          types.WorkflowEnv      `json:"environment,omitempty"`
-	Inputs               []types.FactoryInput   `json:"inputs,omitempty"`
-	RawConfig            string                 `json:"rawConfig,omitempty"`
+	Name                 string                         `json:"name"`
+	WorkspaceName        string                         `json:"workspaceName"`
+	Source               string                         `json:"source"`
+	Integration          string                         `json:"integration"`
+	IntegrationWorkspace string                         `json:"integrationWorkspace,omitempty"`
+	TriggerStatus        string                         `json:"triggerStatus,omitempty"`
+	DoneStatus           string                         `json:"doneStatus,omitempty"`
+	Projects             []string                       `json:"projects,omitempty"`
+	Labels               []string                       `json:"labels,omitempty"`
+	ExcludeLabels        []string                       `json:"exclude_labels,omitempty"`
+	AssignedTo           string                         `json:"assignedTo,omitempty"`
+	Enabled              bool                           `json:"enabled"`
+	HasWebhookSecret     bool                           `json:"hasWebhookSecret"`
+	WebhookSecretRef     string                         `json:"webhookSecretRef,omitempty"`
+	PipelineYAML         string                         `json:"pipelineYAML,omitempty"`
+	EnableManualTrigger  bool                           `json:"enableManualTrigger,omitempty"`
+	Provider             string                         `json:"provider,omitempty"`
+	AllowedProviders     []types.WorkflowProviderOption `json:"allowedProviders,omitempty"`
+	SecretRefs           map[string]string              `json:"secretRefs,omitempty"`
+	Volumes              []types.WorkflowVolume         `json:"volumes,omitempty"`
+	Environment          types.WorkflowEnv              `json:"environment,omitempty"`
+	Inputs               []types.FactoryInput           `json:"inputs,omitempty"`
+	RawConfig            string                         `json:"rawConfig,omitempty"`
 }
 
 func (s *Server) handleWorkspacesList(w http.ResponseWriter, _ *http.Request) {
@@ -317,7 +319,10 @@ func (s *Server) triggerWorkflowConfig(w http.ResponseWriter, r *http.Request, w
 		return
 	}
 
-	var req FactoryTriggerRequest
+	var req struct {
+		Inputs   map[string]interface{} `json:"inputs"`
+		Provider string                 `json:"provider"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
@@ -328,8 +333,14 @@ func (s *Server) triggerWorkflowConfig(w http.ResponseWriter, r *http.Request, w
 		return
 	}
 
-	if workflow.Integration == "github-issues" || (workflow.Trigger != nil && workflow.Trigger.GitHubIssues != nil) {
-		clawID, created, err := s.createClawForManualGitHubIssueWorkflow(r.Context(), workspace, workflow, validatedInputs)
+	selectedWorkflow, err := s.workflowForManualProvider(workflow, req.Provider)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if selectedWorkflow.Integration == "github-issues" || (selectedWorkflow.Trigger != nil && selectedWorkflow.Trigger.GitHubIssues != nil) {
+		clawID, created, err := s.createClawForManualGitHubIssueWorkflow(r.Context(), workspace, selectedWorkflow, validatedInputs)
 		if err != nil {
 			if isFactoryTriggerAlreadyClaimed(err) {
 				jsonError(w, http.StatusConflict, "workflow trigger already in progress for this GitHub issue")
@@ -349,7 +360,7 @@ func (s *Server) triggerWorkflowConfig(w http.ResponseWriter, r *http.Request, w
 		return
 	}
 
-	clawID, _, err := s.createClawFromWorkflowContext(r.Context(), workspace, workflow, validatedInputs, "manual workflow trigger")
+	clawID, _, err := s.createClawFromWorkflowContext(r.Context(), workspace, selectedWorkflow, validatedInputs, "manual workflow trigger")
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "failed to create claw: "+err.Error())
 		return
@@ -358,6 +369,35 @@ func (s *Server) triggerWorkflowConfig(w http.ResponseWriter, r *http.Request, w
 		"claw_id": clawID,
 		"status":  "created",
 	})
+}
+
+func (s *Server) workflowForManualProvider(workflow *types.WorkflowConfig, requestedProvider string) (*types.WorkflowConfig, error) {
+	requestedProvider = strings.TrimSpace(requestedProvider)
+	if requestedProvider == "" {
+		return workflow, nil
+	}
+
+	allowed := false
+	for _, option := range workflow.AllowedProviders {
+		if option.Provider == requestedProvider {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return nil, fmt.Errorf("provider %q is not allowed for manual runs of workflow %q", requestedProvider, workflow.Name)
+	}
+
+	s.mu.RLock()
+	_, configured := s.hubCfg.Providers[requestedProvider]
+	s.mu.RUnlock()
+	if !configured {
+		return nil, fmt.Errorf("provider %q is not configured on this hub", requestedProvider)
+	}
+
+	selected := *workflow
+	selected.Provider = requestedProvider
+	return &selected, nil
 }
 
 func (s *Server) createClawForManualGitHubIssueWorkflow(ctx context.Context, workspace *types.WorkspaceConfig, workflow *types.WorkflowConfig, inputs map[string]string) (string, bool, error) {
@@ -499,6 +539,8 @@ func workflowToView(workspaceName string, workflow *types.WorkflowConfig) Workfl
 		AssignedTo:           workflow.AssignedTo,
 		Enabled:              workflow.Enabled == nil || *workflow.Enabled,
 		EnableManualTrigger:  workflow.EnableManualTrigger,
+		Provider:             workflow.Provider,
+		AllowedProviders:     append([]types.WorkflowProviderOption(nil), workflow.AllowedProviders...),
 		SecretRefs:           cloneStringMap(workflow.SecretRefs),
 		Volumes:              append([]types.WorkflowVolume(nil), workflow.Volumes...),
 		Environment:          workflow.Environment,

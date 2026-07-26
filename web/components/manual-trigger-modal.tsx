@@ -1,7 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useCallback } from "react"
 import { Zap, Play, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,30 +21,20 @@ interface ManualTriggerModalProps {
 }
 
 export function ManualTriggerModal({ open, onOpenChange, workflow }: ManualTriggerModalProps) {
-  const [inputValues, setInputValues] = useState<Record<string, string>>({})
+  const [formState, setFormState] = useState<{
+    workflowKey: string
+    inputValues: Record<string, string>
+    selectedProvider: string
+  }>({ workflowKey: "", inputValues: {}, selectedProvider: "" })
   const [triggering, setTriggering] = useState(false)
   const [triggerError, setTriggerError] = useState<string | null>(null)
-  const router = useRouter()
 
-  // Seed defaults when workflow changes
-  useEffect(() => {
-    if (!workflow?.inputs) {
-      setInputValues({})
-      return
-    }
-    const defaults: Record<string, string> = {}
-    for (const input of workflow.inputs) {
-      if (input.default) {
-        defaults[input.name] = input.default
-      } else if (input.type === "bool") {
-        defaults[input.name] = "false"
-      } else if (input.type === "enum" && input.options && input.options.length > 0) {
-        defaults[input.name] = input.options[0]
-      }
-    }
-    setInputValues(defaults)
-    setTriggerError(null)
-  }, [workflow])
+  const workflowKey = workflow ? `${workflow.workspaceName}/${workflow.name}` : ""
+  const defaults = workflowDefaults(workflow)
+  const inputValues = formState.workflowKey === workflowKey ? formState.inputValues : defaults.inputValues
+  const effectiveProvider = formState.workflowKey === workflowKey
+    ? formState.selectedProvider
+    : defaults.selectedProvider
 
   const handleTrigger = useCallback(async () => {
     if (!workflow) return
@@ -79,7 +68,7 @@ export function ManualTriggerModal({ open, onOpenChange, workflow }: ManualTrigg
           }
         }
       }
-      await triggerWorkflow(workflow, inputs)
+      await triggerWorkflow(workflow, inputs, effectiveProvider)
       setTriggering(false)
       onOpenChange(false)
     } catch (e) {
@@ -87,7 +76,7 @@ export function ManualTriggerModal({ open, onOpenChange, workflow }: ManualTrigg
       // Keep modal open so user sees the backend validation error
       setTriggerError(e instanceof Error ? e.message : String(e))
     }
-  }, [workflow, inputValues, onOpenChange])
+  }, [workflow, inputValues, effectiveProvider, onOpenChange])
 
   if (!workflow) return null
 
@@ -106,6 +95,32 @@ export function ManualTriggerModal({ open, onOpenChange, workflow }: ManualTrigg
           </DialogDescription>
         </DialogHeader>
 
+        {workflow.allowedProviders && workflow.allowedProviders.length > 0 && (
+          <div className="space-y-1.5 py-2">
+            <label className="text-sm font-medium">Run environment</label>
+            <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Run environment">
+              {workflow.allowedProviders.map((option) => (
+                <Button
+                  key={option.provider}
+                  type="button"
+                  variant={effectiveProvider === option.provider ? "default" : "outline"}
+                  role="radio"
+                  aria-checked={effectiveProvider === option.provider}
+                  onClick={() => setFormState({
+                    workflowKey,
+                    inputValues,
+                    selectedProvider: option.provider,
+                  })}
+                  disabled={triggering}
+                  className="h-auto min-h-9 min-w-32 flex-1 whitespace-normal"
+                >
+                  {option.label || option.provider}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {workflow.inputs && workflow.inputs.length > 0 && (
           <div className="space-y-4 py-2">
             {workflow.inputs.map((input) => (
@@ -113,7 +128,11 @@ export function ManualTriggerModal({ open, onOpenChange, workflow }: ManualTrigg
                 key={input.name}
                 input={input}
                 value={inputValues[input.name] || ""}
-                onChange={(val) => setInputValues((prev) => ({ ...prev, [input.name]: val }))}
+                onChange={(val) => setFormState({
+                  workflowKey,
+                  inputValues: { ...inputValues, [input.name]: val },
+                  selectedProvider: effectiveProvider,
+                })}
               />
             ))}
           </div>
@@ -147,6 +166,28 @@ export function ManualTriggerModal({ open, onOpenChange, workflow }: ManualTrigg
       </DialogContent>
     </Dialog>
   )
+}
+
+function workflowDefaults(workflow?: Workflow | null): {
+  inputValues: Record<string, string>
+  selectedProvider: string
+} {
+  const inputValues: Record<string, string> = {}
+  for (const input of workflow?.inputs || []) {
+    if (input.default) {
+      inputValues[input.name] = input.default
+    } else if (input.type === "bool") {
+      inputValues[input.name] = "false"
+    } else if (input.type === "enum" && input.options && input.options.length > 0) {
+      inputValues[input.name] = input.options[0]
+    }
+  }
+
+  const providerOptions = workflow?.allowedProviders || []
+  const selectedProvider = providerOptions.some((option) => option.provider === workflow?.provider)
+    ? workflow?.provider || ""
+    : providerOptions[0]?.provider || ""
+  return { inputValues, selectedProvider }
 }
 
 function WorkflowInputField({

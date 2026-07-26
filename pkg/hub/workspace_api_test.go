@@ -503,6 +503,62 @@ func TestWorkspaceWorkflowTriggerUsesWorkflowRules(t *testing.T) {
 	}
 }
 
+func TestWorkflowManualProviderSelection(t *testing.T) {
+	s, _ := NewTestServerWithConfig(t, &types.HubConfig{
+		Providers: map[string]types.ProviderConfig{
+			"docker":  {Type: "docker"},
+			"daytona": {Type: "daytona"},
+		},
+	}, "", "", "")
+	workflow := &types.WorkflowConfig{
+		Name:     "manual-task",
+		Provider: "daytona",
+		AllowedProviders: []types.WorkflowProviderOption{
+			{Provider: "docker", Label: "Local Docker"},
+			{Provider: "daytona", Label: "Cloud Daytona"},
+		},
+	}
+
+	selected, err := s.workflowForManualProvider(workflow, "docker")
+	if err != nil {
+		t.Fatalf("select provider: %v", err)
+	}
+	if selected.Provider != "docker" {
+		t.Fatalf("selected provider = %q, want docker", selected.Provider)
+	}
+	if workflow.Provider != "daytona" {
+		t.Fatalf("selection mutated persisted workflow provider to %q", workflow.Provider)
+	}
+
+	if _, err := s.workflowForManualProvider(workflow, "replicated"); err == nil || !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("unlisted provider error = %v, want not allowed", err)
+	}
+
+	workflow.AllowedProviders = append(workflow.AllowedProviders, types.WorkflowProviderOption{Provider: "replicated"})
+	if _, err := s.workflowForManualProvider(workflow, "replicated"); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("unconfigured provider error = %v, want not configured", err)
+	}
+}
+
+func TestWorkflowViewIncludesManualProviderOptions(t *testing.T) {
+	workflow := &types.WorkflowConfig{
+		Name:     "manual-task",
+		Provider: "daytona",
+		AllowedProviders: []types.WorkflowProviderOption{
+			{Provider: "docker", Label: "Local Docker"},
+			{Provider: "daytona", Label: "Cloud Daytona"},
+		},
+	}
+
+	view := workflowToView("engineering", workflow)
+	if view.Provider != "daytona" || len(view.AllowedProviders) != 2 {
+		t.Fatalf("provider view = %#v", view)
+	}
+	if view.AllowedProviders[0].Provider != "docker" || view.AllowedProviders[0].Label != "Local Docker" {
+		t.Fatalf("first provider option = %#v", view.AllowedProviders[0])
+	}
+}
+
 func TestWorkspaceWorkflowTriggerAllowsPausedManualWorkflow(t *testing.T) {
 	t.Setenv("ELASTICCLAW_HUB_CONFIG", t.TempDir()+"/hub.yaml")
 	t.Setenv("ELASTICCLAW_NOOP_PROVIDER", "1")

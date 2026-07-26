@@ -289,6 +289,11 @@ export interface WorkflowInput {
   max?: number
 }
 
+export interface WorkflowProviderOption {
+  provider: string
+  label?: string
+}
+
 export interface RepositoryAccess {
   repo: string
   permissions?: string
@@ -317,6 +322,8 @@ export interface Workflow {
   webhookSecretRef?: string
   pipelineYAML?: string
   enableManualTrigger?: boolean
+  provider?: string
+  allowedProviders?: WorkflowProviderOption[]
   secretRefs?: Record<string, string>
   inputs?: WorkflowInput[]
 }
@@ -354,12 +361,16 @@ export async function updateWorkflowControls(
   )
 }
 
-export async function triggerWorkflow(workflow: Workflow, inputs?: Record<string, unknown>): Promise<{ claw_id: string; status: string }> {
+export async function triggerWorkflow(
+  workflow: Workflow,
+  inputs?: Record<string, unknown>,
+  provider?: string
+): Promise<{ claw_id: string; status: string }> {
   return apiFetch<{ claw_id: string; status: string }>(
     `/api/workspaces/${encodeURIComponent(workflow.workspaceName)}/workflows/${encodeURIComponent(workflow.name)}/trigger`,
     {
       method: "POST",
-      body: JSON.stringify({ inputs: inputs || {} }),
+      body: JSON.stringify({ inputs: inputs || {}, ...(provider ? { provider } : {}) }),
     }
   )
 }

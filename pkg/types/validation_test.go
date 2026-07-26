@@ -44,6 +44,56 @@ func TestValidateRepositoryAccessPatterns(t *testing.T) {
 	}
 }
 
+func TestWorkflowConfigValidateAllowedProviders(t *testing.T) {
+	tests := []struct {
+		name    string
+		options []WorkflowProviderOption
+		wantErr string
+	}{
+		{
+			name: "valid dynamic options",
+			options: []WorkflowProviderOption{
+				{Provider: "docker", Label: "Local Docker"},
+				{Provider: "daytona", Label: "Cloud Daytona"},
+			},
+		},
+		{
+			name:    "provider is required",
+			options: []WorkflowProviderOption{{Label: "Missing"}},
+			wantErr: "allowed_providers[0].provider is required",
+		},
+		{
+			name:    "provider must be supported",
+			options: []WorkflowProviderOption{{Provider: "invented"}},
+			wantErr: "invalid allowed provider",
+		},
+		{
+			name: "providers must be unique",
+			options: []WorkflowProviderOption{
+				{Provider: "docker"},
+				{Provider: "docker", Label: "Duplicate"},
+			},
+			wantErr: `duplicate allowed provider "docker"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workflow := &WorkflowConfig{Name: "manual-task", AllowedProviders: tt.options}
+			err := workflow.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestFactoryConfigValidate(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -133,16 +133,18 @@ func runWorkflowShow(workspace, name string) error {
 func workflowTriggerCmd() *cobra.Command {
 	var workspace string
 	var inputs []string
+	var provider string
 	cmd := &cobra.Command{
 		Use:   "trigger <name>",
 		Short: "Manually trigger a workflow with inputs",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflowTrigger(workspace, args[0], inputs)
+			return runWorkflowTrigger(workspace, args[0], inputs, provider)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", "default", "workspace name")
 	cmd.Flags().StringArrayVar(&inputs, "input", nil, "input values as key=value (can be repeated)")
+	cmd.Flags().StringVar(&provider, "provider", "", "allowed provider to use for this manual run")
 	return cmd
 }
 
@@ -273,7 +275,7 @@ func readWorkflowFiles(paths []string) ([]*types.WorkflowConfig, error) {
 	return workflows, nil
 }
 
-func runWorkflowTrigger(workspace, name string, inputs []string) error {
+func runWorkflowTrigger(workspace, name string, inputs []string, provider string) error {
 	hubURL, clawToken, err := resolveHubConn()
 	if err != nil {
 		return err
@@ -283,7 +285,11 @@ func runWorkflowTrigger(workspace, name string, inputs []string) error {
 		return err
 	}
 
-	body, _ := json.Marshal(map[string]interface{}{"inputs": inputMap})
+	payload := map[string]interface{}{"inputs": inputMap}
+	if provider = strings.TrimSpace(provider); provider != "" {
+		payload["provider"] = provider
+	}
+	body, _ := json.Marshal(payload)
 	path := fmt.Sprintf("/api/workspaces/%s/workflows/%s/trigger", url.PathEscape(workspace), url.PathEscape(name))
 	req, _ := http.NewRequest(http.MethodPost, hubURL+path, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

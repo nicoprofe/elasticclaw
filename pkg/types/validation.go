@@ -222,6 +222,24 @@ func (w *WorkflowConfig) Validate() error {
 	if w.Provider != "" && !validProviders[w.Provider] {
 		return fmt.Errorf("workflow %q: invalid provider %q (must be one of: %s)", w.Name, w.Provider, validProviderList)
 	}
+	// A workflow may offer a choice of sandbox provider at manual-trigger time.
+	// Every option must be a provider the hub actually supports, and listing one
+	// twice would render a duplicate entry in the picker.
+	seenProviders := make(map[string]struct{}, len(w.AllowedProviders))
+	for i, option := range w.AllowedProviders {
+		provider := strings.TrimSpace(option.Provider)
+		if provider == "" {
+			return fmt.Errorf("workflow %q: allowed_providers[%d].provider is required", w.Name, i)
+		}
+		if !validProviders[provider] {
+			return fmt.Errorf("workflow %q: invalid allowed provider %q (must be one of: %s)", w.Name, provider, validProviderList)
+		}
+		if _, exists := seenProviders[provider]; exists {
+			return fmt.Errorf("workflow %q: duplicate allowed provider %q", w.Name, provider)
+		}
+		seenProviders[provider] = struct{}{}
+	}
+
 	switch strings.ToLower(strings.TrimSpace(w.Environment.Preflight)) {
 	case "", "warn", "required", "off":
 	default:

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -162,5 +163,39 @@ func TestRunWorkflowRunsListsRunsAndShortAgentID(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// The provider chosen in the trigger dialog has to reach the hub, or the picker is
+// decorative: the run would silently use the workspace default.
+func TestRunWorkflowTriggerSendsProviderOverride(t *testing.T) {
+	var received map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/workspaces/engineering/workflows/manual-task/trigger" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+		}
+		if err := json.Unmarshal(body, &received); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"claw_id":"12345678-1234","status":"created"}`))
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("ELASTICCLAW_HUB_URL", server.URL)
+	t.Setenv("ELASTICCLAW_CLAW_TOKEN", "test-token")
+
+	if err := runWorkflowTrigger("engineering", "manual-task", []string{"task=fix it"}, "docker"); err != nil {
+		t.Fatalf("run workflow trigger: %v", err)
+	}
+	if received["provider"] != "docker" {
+		t.Fatalf("provider = %#v, want docker", received["provider"])
+	}
+	inputs, ok := received["inputs"].(map[string]interface{})
+	if !ok || inputs["task"] != "fix it" {
+		t.Fatalf("inputs = %#v", received["inputs"])
 	}
 }
