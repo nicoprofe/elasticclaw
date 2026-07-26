@@ -700,7 +700,6 @@ func (s *Server) tenantByClawToken(token string) (string, error) {
 
 const webSessionHeader = "X-Elasticclaw-Session"
 
-
 func (s *Server) resolveUIPassword() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -4814,7 +4813,7 @@ func (s *Server) provisionDocker(ctx context.Context, clawID string, req types.C
 	// Docker claws, then overlay hub-managed values to prevent callers from
 	// overriding the claw's identity or connection details.
 	containerEnv := mergeDockerContainerEnv(req.Env, map[string]string{
-		"ELASTICCLAW_HUB_URL":            dockerClawHubURL(hubCfg),
+		"ELASTICCLAW_HUB_URL":            dockerClawHubURL(hubCfg, s.addr),
 		"ELASTICCLAW_CLAW_ID":            clawID,
 		"ELASTICCLAW_CLAW_TOKEN":         clawToken,
 		"ELASTICCLAW_MODEL_AUTH_TOKEN":   s.modelAuthTokenForClaw(clawID),
@@ -4915,13 +4914,25 @@ func mergeDockerContainerEnv(requestEnv, managedEnv map[string]string) map[strin
 	return merged
 }
 
-func dockerClawHubURL(cfg *types.HubConfig) string {
-	if cfg == nil {
-		return ""
+func dockerClawHubURL(cfg *types.HubConfig, listenAddr string) string {
+	hubURL := ""
+	if cfg != nil {
+		hubURL = cfg.PublicURL
+		if cfg.URL != "" {
+			hubURL = cfg.URL
+		}
 	}
-	hubURL := cfg.PublicURL
-	if cfg.URL != "" {
-		hubURL = cfg.URL
+	// Fall back to the address the hub is actually listening on. The desktop app
+	// starts the hub with --addr and never writes url into hub.yaml, so without
+	// this the container was handed an empty string as the hub URL: claw-bridge had
+	// nothing to dial, never connected, and the run died at "Connect" with only
+	// "provisioning timed out" to show for it.
+	if strings.TrimSpace(hubURL) == "" && strings.TrimSpace(listenAddr) != "" {
+		addr := listenAddr
+		if strings.HasPrefix(addr, ":") {
+			addr = "127.0.0.1" + addr // ":8080" means every interface
+		}
+		hubURL = "http://" + addr
 	}
 	parsed, err := url.Parse(hubURL)
 	if err != nil || parsed.Hostname() == "" {

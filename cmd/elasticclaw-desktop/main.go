@@ -64,8 +64,14 @@ func main() {
 		fatal("Could not find a free local port.\n\n" + err.Error())
 		return
 	}
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	url := "http://" + addr
+	// Bind every interface, not just loopback. Agents run in Docker containers that
+	// reach the host through host.docker.internal, which arrives from the Docker
+	// network rather than over loopback — a hub bound to 127.0.0.1 refuses those
+	// connections, so claw-bridge could never call back and every run died at
+	// "Connect". The hub still requires its token, so exposure is authenticated.
+	addr := fmt.Sprintf("0.0.0.0:%d", port)
+	// The window itself always uses loopback.
+	url := fmt.Sprintf("http://127.0.0.1:%d", port)
 
 	// Run the server through the CLI's own hub command so startup, config
 	// discovery and migrations follow exactly one code path. Its lifetime is the
@@ -75,7 +81,7 @@ func main() {
 		cmd.Execute()
 	}()
 
-	if !waitForListener(addr, 60*time.Second) {
+	if !waitForListener(fmt.Sprintf("127.0.0.1:%d", port), 60*time.Second) {
 		fatal("The ElasticClaw server did not start.\n\nSee the log at:\n" + logPath)
 		return
 	}
