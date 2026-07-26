@@ -20,6 +20,7 @@ import {
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { MarkdownContent } from "@/components/markdown-content"
+import { ElapsedTimer } from "@/components/elapsed-timer"
 import { COLOR_CLASSES, mapApiMessage } from "@/lib/mappers"
 import { useWindowedMessages } from "@/hooks/use-windowed-messages"
 import { Button } from "@/components/ui/button"
@@ -64,15 +65,6 @@ interface ConversationViewProps {
 }
 
 const FOLLOW_LATEST_THRESHOLD_PX = 24
-
-function formatUptime(seconds: number): string {
-  if (seconds === 0) return "—"
-  if (seconds < 60) return `${seconds}s`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
-  const hours = Math.floor(seconds / 3600)
-  const mins = Math.floor((seconds % 3600) / 60)
-  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`
-}
 
 function formatPreviewExpiry(expiresAt?: number): string | null {
   if (!expiresAt) return null
@@ -319,10 +311,10 @@ function ClawCardBack({ claw }: { claw: Claw }) {
 
       <div>
         <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
-          Uptime
+          Elapsed
         </h3>
         <p className="text-sm font-mono text-foreground">
-          {formatUptime(claw.uptime)}
+          <ElapsedTimer claw={claw} />
         </p>
       </div>
 
@@ -597,7 +589,7 @@ function ClawBoardCard({
                 ) : claw.status === "error" ? (
                   <span className="text-red-500">error</span>
                 ) : (
-                  <span className="text-muted-foreground">{formatUptime(claw.uptime)}</span>
+                  <ElapsedTimer claw={claw} className="text-muted-foreground" />
                 )}
               </span>
             </div>
@@ -1600,7 +1592,7 @@ function ClawChatView({
               className="flex-1 font-mono text-xl font-semibold text-foreground"
             />
             <StatusBadge status={claw.status} />
-            <span className="text-sm text-muted-foreground font-mono">{formatUptime(claw.uptime)}</span>
+            <ElapsedTimer claw={claw} className="text-sm text-muted-foreground font-mono" />
           </div>
           <div className="flex items-center gap-2">
             {claw.ssh_host && (
