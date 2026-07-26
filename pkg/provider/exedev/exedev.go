@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/elasticclaw/elasticclaw/pkg/procutil"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -77,7 +78,7 @@ func (p *Provider) sshVMArgs(host string) []string {
 // run executes an ssh exe.dev <command> and returns stdout/stderr.
 func (p *Provider) run(ctx context.Context, commandParts ...string) ([]byte, error) {
 	args := append(p.sshArgs(), commandParts...)
-	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd := procutil.Hide(exec.CommandContext(ctx, "ssh", args...))
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
@@ -184,7 +185,7 @@ func (p *Provider) Exec(ctx context.Context, instanceID string, cmdArgs []string
 
 	args := p.sshVMArgs(host)
 	args = append(args, cmdArgs...)
-	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd := procutil.Hide(exec.CommandContext(ctx, "ssh", args...))
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
@@ -348,14 +349,14 @@ func (p *Provider) WriteFile(ctx context.Context, instanceID string, path string
 
 	// Ensure parent directory exists
 	mkdirArgs := append(args, shellQuote([]string{"mkdir", "-p", "--", filepath.Dir(path)}))
-	mkdirCmd := exec.CommandContext(ctx, "ssh", mkdirArgs...)
+	mkdirCmd := procutil.Hide(exec.CommandContext(ctx, "ssh", mkdirArgs...))
 	if out, err := mkdirCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("exedev writefile mkdir %s: %w (out: %s)", path, err, string(out))
 	}
 
 	// Pipe raw content via stdin to cat on the remote — no escaping needed
 	catArgs := append(args, "cat > "+shellQuote([]string{path}))
-	cmd := exec.CommandContext(ctx, "ssh", catArgs...)
+	cmd := procutil.Hide(exec.CommandContext(ctx, "ssh", catArgs...))
 	cmd.Stdin = bytes.NewReader(content)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -375,7 +376,7 @@ func (p *Provider) SetupScript(ctx context.Context, instanceID string, script st
 	args = append(args, "bash", "-s")
 
 	// Pipe script via stdin to bash on the remote
-	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd := procutil.Hide(exec.CommandContext(ctx, "ssh", args...))
 	cmd.Stdin = strings.NewReader(script)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

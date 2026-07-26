@@ -176,6 +176,15 @@ function LoginForm() {
     <div className="flex h-screen bg-background items-center justify-center">
       <div className="w-full max-w-sm space-y-6 p-8 border border-border rounded-xl bg-card">
         <div className="space-y-1 text-center">
+          {/* Same artwork as the app icon, so the sign-in screen and the window
+              icon read as one product rather than two similar marks. */}
+          <img
+            src="/lobster.png"
+            alt=""
+            width={64}
+            height={64}
+            className="mx-auto mb-3 size-16 rounded-2xl"
+          />
           <h1 className="text-2xl font-semibold tracking-tight">{appName}</h1>
           <p className="text-sm text-muted-foreground">
             {isCallback ? "Completing sign-in…" : "Sign in to continue"}
@@ -247,6 +256,15 @@ function LoginFallback() {
     <div className="flex h-screen bg-background items-center justify-center">
       <div className="w-full max-w-sm space-y-6 p-8 border border-border rounded-xl bg-card">
         <div className="space-y-1 text-center">
+          {/* Same artwork as the app icon, so the sign-in screen and the window
+              icon read as one product rather than two similar marks. */}
+          <img
+            src="/lobster.png"
+            alt=""
+            width={64}
+            height={64}
+            className="mx-auto mb-3 size-16 rounded-2xl"
+          />
           <h1 className="text-2xl font-semibold tracking-tight">{appName}</h1>
           <p className="text-sm text-muted-foreground">Loading…</p>
         </div>

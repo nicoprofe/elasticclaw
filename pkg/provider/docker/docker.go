@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/elasticclaw/elasticclaw/pkg/procutil"
 	"os/exec"
 	"strings"
 	"time"
@@ -136,30 +137,30 @@ func (p *Provider) CopyIn(ctx context.Context, containerName, dest string, conte
 		return err
 	}
 
-	mkdirCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "0", containerName, "mkdir", "-p", destDir)
+	mkdirCmd := procutil.Hide(exec.CommandContext(ctx, "docker", "exec", "-u", "0", containerName, "mkdir", "-p", destDir))
 	if out, err := mkdirCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker mkdir -p %s: %w (out: %s)", destDir, err, string(out))
 	}
 	if destDir != "/" {
-		chownDirCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "0", containerName, "chown", uid+":"+gid, destDir)
+		chownDirCmd := procutil.Hide(exec.CommandContext(ctx, "docker", "exec", "-u", "0", containerName, "chown", uid+":"+gid, destDir))
 		if out, err := chownDirCmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("docker chown %s: %w (out: %s)", destDir, err, string(out))
 		}
 		if parentDir := parentPath(destDir); parentDir != "" && parentDir != "/" {
-			chownParentCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "0", containerName, "chown", uid+":"+gid, parentDir)
+			chownParentCmd := procutil.Hide(exec.CommandContext(ctx, "docker", "exec", "-u", "0", containerName, "chown", uid+":"+gid, parentDir))
 			if out, err := chownParentCmd.CombinedOutput(); err != nil {
 				return fmt.Errorf("docker chown %s: %w (out: %s)", parentDir, err, string(out))
 			}
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", "cp", "-", containerName+":"+destDir)
+	cmd := procutil.Hide(exec.CommandContext(ctx, "docker", "cp", "-", containerName+":"+destDir))
 	cmd.Stdin = &buf
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker cp %s: %w (out: %s)", dest, err, string(out))
 	}
-	chownFileCmd := exec.CommandContext(ctx, "docker", "exec", "-u", "0", containerName, "chown", uid+":"+gid, dest)
+	chownFileCmd := procutil.Hide(exec.CommandContext(ctx, "docker", "exec", "-u", "0", containerName, "chown", uid+":"+gid, dest))
 	if out, err := chownFileCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker chown %s: %w (out: %s)", dest, err, string(out))
 	}
@@ -179,12 +180,12 @@ func parentPath(path string) string {
 }
 
 func dockerContainerUser(ctx context.Context, containerName string) (string, string, error) {
-	uidCmd := exec.CommandContext(ctx, "docker", "exec", containerName, "id", "-u")
+	uidCmd := procutil.Hide(exec.CommandContext(ctx, "docker", "exec", containerName, "id", "-u"))
 	uidOut, err := uidCmd.CombinedOutput()
 	if err != nil {
 		return "", "", fmt.Errorf("docker id -u: %w (out: %s)", err, string(uidOut))
 	}
-	gidCmd := exec.CommandContext(ctx, "docker", "exec", containerName, "id", "-g")
+	gidCmd := procutil.Hide(exec.CommandContext(ctx, "docker", "exec", containerName, "id", "-g"))
 	gidOut, err := gidCmd.CombinedOutput()
 	if err != nil {
 		return "", "", fmt.Errorf("docker id -g: %w (out: %s)", err, string(gidOut))
@@ -200,7 +201,7 @@ func dockerContainerUser(ctx context.Context, containerName string) (string, str
 // Exec runs a command inside a running container.
 func (p *Provider) Exec(ctx context.Context, instanceID string, cmdArgs []string) (*types.ExecResult, error) {
 	args := append([]string{"exec", instanceID}, cmdArgs...)
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := procutil.Hide(exec.CommandContext(ctx, "docker", args...))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -334,7 +335,7 @@ func (p *Provider) List(ctx context.Context) ([]*types.Instance, error) {
 
 // dockerRun executes a docker CLI command and returns its stdout.
 func dockerRun(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := procutil.Hide(exec.CommandContext(ctx, "docker", args...))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

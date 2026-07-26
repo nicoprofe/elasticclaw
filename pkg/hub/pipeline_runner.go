@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/elasticclaw/elasticclaw/pkg/procutil"
 	"io"
 	"log"
 	"net/http"
@@ -485,7 +486,7 @@ func (s *Server) executePipelineCommand(clawID, command string, timeout time.Dur
 }
 
 func executeLocalPipelineRun(ctx context.Context, command string) (*pipelineRunResult, error) {
-	cmd := osexec.CommandContext(ctx, "bash", "-lc", command)
+	cmd := procutil.Hide(osexec.CommandContext(ctx, "bash", "-lc", command))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
