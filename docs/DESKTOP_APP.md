@@ -9,7 +9,33 @@ subsystem so its output lands in a terminal; a desktop app must be linked with
 `-H=windowsgui` so double-clicking it does not flash up a console window. One
 executable cannot be both.
 
-## Install
+## Platform support
+
+The **desktop window is Windows-only.** Every file in `cmd/elasticclaw-desktop/` is
+built with `//go:build windows`; there is no macOS or Linux desktop build.
+
+macOS and Linux get the **CLI** from the same release — `elasticclaw hub` starts the
+hub and you open the built-in dashboard in a browser. One-line install:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/nicoprofe/elasticclaw/main/scripts/install.sh | sh
+```
+
+```powershell
+# Windows CLI (the desktop app is a separate download)
+irm https://raw.githubusercontent.com/nicoprofe/elasticclaw/main/scripts/install.ps1 | iex
+```
+
+Both scripts verify the download against the release `checksums.txt` and refuse to
+install a binary whose hash does not match. On macOS `install.sh` also clears the
+quarantine attribute, because the binaries are not notarized and Gatekeeper would
+otherwise refuse to run them.
+
+There is no Homebrew formula for this fork. `brew install elasticclaw` does not
+exist in homebrew-core, and upstream's tap installs upstream's build rather than
+this one.
+
+## Install (Windows desktop)
 
 Download from the landing page or the
 [releases page](https://github.com/nicoprofe/elasticclaw/releases/latest), then
