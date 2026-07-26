@@ -129,10 +129,48 @@ build_desktop() {
     -o "${OUTPUT_DIR}/${asset}" ./cmd/elasticclaw-desktop/
 }
 
+# The macOS and Linux desktop builds need cgo, so unlike everything else here they
+# cannot be cross-compiled from one machine. Each is produced by a job running on its
+# own platform and uploaded into the same release; see .github/workflows/release.yml.
+# These helpers exist so those jobs and a developer on that platform run the same
+# command rather than two similar ones that drift.
+build_desktop_darwin() {
+  local goarch="$1" asset="$2"
+  echo "→ ${asset} (requires macOS; links against WebKit)"
+  CGO_ENABLED=1 GOOS=darwin GOARCH="$goarch" \
+    go build -trimpath -tags embedweb -ldflags "$LDFLAGS -X main.Version=${VERSION}" \
+    -o "${OUTPUT_DIR}/${asset}" ./cmd/elasticclaw-desktop/
+}
+
+# desktopgui selects the real GTK/WebKitGTK backend. Without it the package builds
+# but reports that it has no GUI support, which is what keeps `go build ./...`
+# working on machines with no WebKit headers.
+build_desktop_linux() {
+  local goarch="$1" asset="$2"
+  echo "→ ${asset} (requires libwebkit2gtk-4.1-dev; dynamically linked)"
+  CGO_ENABLED=1 GOOS=linux GOARCH="$goarch" \
+    go build -trimpath -tags "embedweb desktopgui" -ldflags "$LDFLAGS -X main.Version=${VERSION}" \
+    -o "${OUTPUT_DIR}/${asset}" ./cmd/elasticclaw-desktop/
+}
+
 build_windows_resource
 
 build_desktop amd64 elasticclaw-desktop-windows-amd64.exe
 build_desktop arm64 elasticclaw-desktop-windows-arm64.exe
+
+# DESKTOP_TARGET lets the per-platform CI jobs ask for just their own artifact.
+# Unset means "the cross-compilable set", which is what the main release job wants.
+case "${DESKTOP_TARGET:-}" in
+darwin)
+  build_desktop_darwin amd64 elasticclaw-desktop-darwin-amd64
+  build_desktop_darwin arm64 elasticclaw-desktop-darwin-arm64
+  ;;
+linux)
+  # Only the host architecture: cgo cross-compilation would need a full sysroot for
+  # the other one, and a wrong-but-present binary is worse than an absent one.
+  build_desktop_linux "$(go env GOHOSTARCH)" "elasticclaw-desktop-linux-$(go env GOHOSTARCH)"
+  ;;
+esac
 
 # claw-bridge runs inside sandboxes (always linux/amd64) and is downloaded by
 # the hub at run time — it must ship in the same release as the hub binary.

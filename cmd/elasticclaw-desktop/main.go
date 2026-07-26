@@ -1,15 +1,14 @@
-//go:build windows
-
-// Command elasticclaw-desktop is the native Windows desktop application.
+// Command elasticclaw-desktop is the native desktop application.
 //
-// It is a separate binary from elasticclaw.exe on purpose. A CLI needs the
+// It is a separate binary from the elasticclaw CLI on purpose. A CLI needs the
 // console subsystem so its output appears in a terminal; a desktop app must be
-// linked with -H=windowsgui so double-clicking it does not flash up a console
-// window. One executable cannot be both.
+// linked with -H=windowsgui on Windows so double-clicking it does not flash up a
+// console window. One executable cannot be both.
 //
-// The window is a real Win32 window hosting WebView2 (the Edge engine that ships
-// with Windows 10 and 11) — not a browser process, so there is no address bar,
-// no tab strip, and no dependency on which browser is installed.
+// The window is a native one hosting the platform's own web view — not a browser
+// process, so there is no address bar, no tab strip, and no dependency on which
+// browser is installed. Each platform supplies its own backend through
+// runWindow: WebView2 on Windows, WKWebView on macOS, WebKitGTK on Linux.
 package main
 
 import (
@@ -21,7 +20,6 @@ import (
 	"time"
 
 	"github.com/elasticclaw/elasticclaw/cmd"
-	"github.com/jchv/go-webview2"
 )
 
 // Version is stamped at build time and shown in Add or Remove Programs.
@@ -86,32 +84,11 @@ func main() {
 		return
 	}
 
-	w := webview2.NewWithOptions(webview2.WebViewOptions{
-		Debug: false,
-		WindowOptions: webview2.WindowOptions{
-			Title:  "ElasticClaw",
-			Width:  1440,
-			Height: 900,
-			Center: true,
-		},
-	})
-	if w == nil {
-		// WebView2 ships with Windows 11 and current Windows 10, but a stripped
-		// or very old install may not have it. Say so instead of exiting silently.
-		fatal("Could not create the application window.\n\n" +
-			"This needs the Microsoft Edge WebView2 runtime, which is normally part of Windows.\n" +
-			"Install it from:\nhttps://developer.microsoft.com/microsoft-edge/webview2/\n\n" +
-			"You can also run the server and use it in a browser:\n  elasticclaw hub")
+	// The window backend is per-platform; everything above this line is not.
+	if err := runWindow(url); err != nil {
+		fatal(err.Error())
 		return
 	}
-	defer w.Destroy()
-
-	// Paint the caption in the app's colours rather than the user's accent colour.
-	applyBrandTitleBar(w.Window())
-	applyWindowIcon(w.Window())
-
-	w.Navigate(url)
-	w.Run() // blocks until the user closes the window
 }
 
 // openLog redirects the standard logger to a file next to the hub's own data,
