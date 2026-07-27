@@ -114,6 +114,9 @@ func (s *Server) handleWorkspaceGitHubAppsCRUD(w http.ResponseWriter, r *http.Re
 			http.Error(w, "save github app: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+		// A freshly attached App means the repository just became readable; give the
+		// workspace its repository guide without waiting to be asked.
+		s.maybeGenerateRepoGuide(workspace)
 		jsonOK(w, map[string]string{"upserted": req.Name})
 	case http.MethodDelete:
 		name := strings.TrimSpace(r.URL.Query().Get("name"))

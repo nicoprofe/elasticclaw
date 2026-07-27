@@ -456,6 +456,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/workspaces/{workspace}/workflows/{workflow}/cron/next", s.withAuth(s.handleCronWorkflowNextRun))    // GET next scheduled run
 	mux.HandleFunc("/api/workspaces/{workspace}/secrets", s.withAdminForMethods(s.handleWorkspaceSecretsCRUD, http.MethodPut, http.MethodPost, http.MethodDelete))
 	mux.HandleFunc("/api/workspaces/{workspace}/github-apps", s.withAdminForMethods(s.handleWorkspaceGitHubAppsCRUD, http.MethodPut, http.MethodPost, http.MethodDelete))
+	mux.HandleFunc("/api/workspaces/{workspace}/repo-guide", s.withAdminForMethods(s.handleWorkspaceRepoGuide, http.MethodPost))
 	mux.HandleFunc("/api/workspaces/{workspace}/issue-trackers", s.withAdminForMethods(s.handleWorkspaceIssueTrackersCRUD, http.MethodPut, http.MethodPost, http.MethodDelete))
 	mux.HandleFunc("/api/secrets", s.withWebAdminAuth(s.handleSecretsCRUD)) // secrets CRUD (GET names, PUT upsert, DELETE)
 	mux.HandleFunc("/api/mcp", s.withWebAdminAuth(s.handleMCPCrud))         // MCP server CRUD (GET list, PUT upsert, DELETE)

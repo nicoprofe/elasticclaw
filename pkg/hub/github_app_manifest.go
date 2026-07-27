@@ -362,6 +362,12 @@ func (s *Server) handleGitHubAppManifestCallback(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// The workspace now has credentials for its repository, which is everything a
+	// repository guide needs — generate one so the first run does not start from a
+	// blank context. Installation may still be pending on GitHub's side, in which
+	// case this fails quietly and the settings button regenerates it later.
+	s.maybeGenerateRepoGuide(workspace)
+
 	// Send the browser somewhere useful: GitHub's install page, so the user picks
 	// which repositories the App may touch. That choice is theirs to make on
 	// GitHub, and it is what scopes every token the hub later mints.

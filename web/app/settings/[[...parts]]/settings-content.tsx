@@ -1711,6 +1711,30 @@ function GitHubSection({ settings, onSave, saving, workspace }: { settings: Sett
   const openModal = () => { resetModal(); setShowModal(true) }
   const closeModal = () => { setShowModal(false); resetModal() }
 
+  // Repository guide: the AGENTS.md every run ships to the agent so it does not
+  // re-read the repository from zero. Generated automatically when an App is
+  // connected; this button re-generates after the repository's layout changes.
+  const [guideBusy, setGuideBusy] = useState(false)
+  const [guideNote, setGuideNote] = useState("")
+  const regenerateGuide = useCallback(async () => {
+    if (!workspace) return
+    setGuideBusy(true)
+    setGuideNote("")
+    try {
+      const res = await fetch(`${hubUrl}/api/workspaces/${encodeURIComponent(workspace)}/repo-guide`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token()}` },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      setGuideNote(`Guide updated (${data.bytes} bytes). New runs receive it automatically.`)
+    } catch (e) {
+      setGuideNote(e instanceof Error ? e.message : "Guide generation failed")
+    } finally {
+      setGuideBusy(false)
+    }
+  }, [hubUrl, workspace])
+
   const workspaceGitHubPath = workspace ? `/api/workspaces/${encodeURIComponent(workspace)}/github-apps` : ""
   const loadWorkspaceApps = useCallback(async () => {
     if (!workspace) return
@@ -1821,6 +1845,26 @@ function GitHubSection({ settings, onSave, saving, workspace }: { settings: Sett
           Install it on your org or specific repos, then add the App ID and private key here.
         </p>
       </div>
+
+      {workspace && (
+        <div className="mb-4 rounded-lg border border-border bg-muted/30 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">Repository guide</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                A generated AGENTS.md that maps this repository — layout, test commands,
+                API surface — so the agent starts every task already knowing the codebase
+                instead of re-reading it. Created automatically when a GitHub App is
+                connected; update it after the repository&apos;s structure changes.
+              </p>
+              {guideNote && <p className="mt-2 text-xs text-muted-foreground">{guideNote}</p>}
+            </div>
+            <Button variant="outline" size="sm" onClick={regenerateGuide} disabled={guideBusy}>
+              {guideBusy ? "Generating..." : "Update guide"}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {workspaceError && <p className="mb-4 text-sm text-destructive">{workspaceError}</p>}
 
