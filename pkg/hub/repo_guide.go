@@ -63,6 +63,8 @@ func generateRepoGuide(in repoGuideInput) string {
 	}
 	b.WriteString("The repository is checked out at `" + checkout + "/` inside your workspace — ")
 	b.WriteString("`cd " + checkout + "` before running any of the commands below, or they will fail as if dependencies were missing.\n\n")
+	b.WriteString("If `memory/TASK_HISTORY.md` exists in your workspace, read it: it lists recent tasks and their pull requests. ")
+	b.WriteString("Their branches are usually not merged, so their changes are absent from your checkout on purpose.\n\n")
 
 	writeLayoutSection(&b, in.Tree)
 	writeCommandsSection(&b, in)

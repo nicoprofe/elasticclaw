@@ -164,6 +164,9 @@ func (s *Server) storePRMention(clawID, repo string, prNumber int, prURL string)
 		}
 	}
 	log.Printf("[pr-watcher] detected PR %s#%d for claw %s", repo, prNumber, clawID[:8])
+	// First detection of this PR (idempotence was checked above), so this is the
+	// moment the run becomes worth remembering for future runs in the workspace.
+	s.appendWorkspaceTaskHistory(clawID, repo, prNumber, prURL)
 	return nil
 }
 
