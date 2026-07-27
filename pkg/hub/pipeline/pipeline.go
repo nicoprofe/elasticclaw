@@ -52,6 +52,10 @@ type Trigger struct {
 	// I'll say [READY_TO_TEST]"), and a substring match fires the transition on
 	// that sentence, before any work is done.
 	MessageLineEquals string `yaml:"message_line_equals"`
+	// PROpened is true when the pr_opened key is present. It fires when a pull
+	// request is first associated with the claw — regardless of whether the agent
+	// opened it or the hub's open_pr action did.
+	PROpened bool
 	// PRMerged is true when the pr_merged key is present in the YAML (even with null value).
 	PRMerged bool
 	// PRClosed is true when the pr_closed key is present in the YAML (even with null value).
@@ -133,6 +137,8 @@ func (t *Trigger) UnmarshalYAML(value *yaml.Node) error {
 			t.MessageContains = val.Value
 		case "message_line_equals":
 			t.MessageLineEquals = val.Value
+		case "pr_opened":
+			t.PROpened = true
 		case "pr_merged":
 			// Presence of the key (even with null/empty/false value) means true
 			t.PRMerged = true
@@ -202,7 +208,7 @@ func (t *Trigger) UnmarshalYAML(value *yaml.Node) error {
 			// with nothing logged and nothing shown in the UI. A config error must
 			// surface when the workflow is loaded, not as a stalled agent an hour later.
 			return fmt.Errorf("line %d: unknown trigger %q (supported: message_contains, "+
-				"message_line_equals, pr_merged, pr_closed, pr_conditions, judge_verdict, "+
+				"message_line_equals, pr_opened, pr_merged, pr_closed, pr_conditions, judge_verdict, "+
 				"gate_result, output_matches)", value.Content[i].Line, key)
 		}
 	}
@@ -216,8 +222,14 @@ func (t *Trigger) UnmarshalYAML(value *yaml.Node) error {
 // dead weight rather than a transition.
 func (t *Trigger) isEmpty() bool {
 	return t.MessageContains == "" && t.MessageLineEquals == "" &&
-		!t.PRMerged && !t.PRClosed && t.PRConditions == nil &&
+		!t.PROpened && !t.PRMerged && !t.PRClosed && t.PRConditions == nil &&
 		t.JudgeVerdict == "" && t.GateResult == nil && t.OutputMatches == nil
+}
+
+// OpenPRAction configures the hub-side pull request creation. Base overrides the
+// repository's default branch as the merge target.
+type OpenPRAction struct {
+	Base string `yaml:"base,omitempty"`
 }
 
 // MoveIssueAction specifies the target status and optional explicit issue ID
@@ -306,6 +318,9 @@ type OnEnter struct {
 	DependencyUpdates DependencyUpdatesAction `yaml:"dependency_updates,omitempty"`
 	// Judge runs a model-backed review pass with constrained inputs.
 	Judge JudgeAction `yaml:"judge,omitempty"`
+	// OpenPR pushes the workspace's task branch and opens the pull request from
+	// the hub, instead of spending agent turns narrating the same mechanical steps.
+	OpenPR *OpenPRAction `yaml:"open_pr,omitempty"`
 	// Inject sends this message to the claw as a user message.
 	Inject string `yaml:"inject"`
 	// MoveIssue moves the associated Linear/Shortcut issue to this status name.
@@ -328,6 +343,7 @@ func (oe *OnEnter) UnmarshalYAML(value *yaml.Node) error {
 		Run                  RunAction   `yaml:"run,omitempty"`
 		DependencyUpdatesRaw yaml.Node   `yaml:"dependency_updates"`
 		Judge                JudgeAction `yaml:"judge,omitempty"`
+		OpenPRRaw            yaml.Node   `yaml:"open_pr"`
 		Inject               string      `yaml:"inject"`
 		MoveIssueRaw         yaml.Node   `yaml:"move_issue"`
 		MergePR              bool        `yaml:"merge_pr,omitempty"`
@@ -342,6 +358,16 @@ func (oe *OnEnter) UnmarshalYAML(value *yaml.Node) error {
 
 	oe.Run = raw.Run
 	oe.Judge = raw.Judge
+	if raw.OpenPRRaw.Kind != 0 {
+		// Presence alone activates it: `open_pr: {}` and a configured mapping both work.
+		var action OpenPRAction
+		if raw.OpenPRRaw.Kind == yaml.MappingNode {
+			if err := raw.OpenPRRaw.Decode(&action); err != nil {
+				return err
+			}
+		}
+		oe.OpenPR = &action
+	}
 	oe.Inject = raw.Inject
 	oe.MergePR = raw.MergePR
 	oe.CloseIssue = raw.CloseIssue
@@ -548,6 +574,18 @@ func normalizeMarkerLine(line string) string {
 	line = strings.TrimRight(line, ".:;! \t")
 	line = strings.Trim(line, "`*_ \t")
 	return strings.TrimRight(line, ".:;! \t")
+}
+
+// StageForPROpened returns the first stage with a pr_opened trigger, or nil.
+func (p *Pipeline) StageForPROpened() *Stage {
+	for i := range p.Stages {
+		for _, t := range p.Stages[i].Triggers {
+			if t.PROpened {
+				return &p.Stages[i]
+			}
+		}
+	}
+	return nil
 }
 
 // StageForPRMerged returns the first stage with a pr_merged trigger, or nil.

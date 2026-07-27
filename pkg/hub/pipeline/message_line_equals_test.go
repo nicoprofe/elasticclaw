@@ -137,3 +137,55 @@ stages:
 		t.Error("pr_merged regressed")
 	}
 }
+
+// The hub-opened-PR flow: the test stage declares open_pr, and the review stage is
+// entered through pr_opened rather than by the agent announcing anything.
+func TestOpenPRActionAndPROpenedTriggerParse(t *testing.T) {
+	p, err := Parse([]byte(`
+stages:
+    - id: test
+      entry: true
+      on_enter:
+        run:
+            command: echo gate
+        open_pr: {}
+        inject: gate passed
+    - id: review
+      triggers:
+        - pr_opened: {}
+        - message_line_equals: '[PR_OPENED]'
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if p.Stages[0].OnEnter.OpenPR == nil {
+		t.Fatal("open_pr was dropped during parsing — the hub would never open the PR")
+	}
+	st := p.StageForPROpened()
+	if st == nil || st.ID != "review" {
+		t.Fatalf("StageForPROpened = %v, want review", st)
+	}
+	// The fallback trigger must coexist: when hub PR creation fails the agent is
+	// asked to open it by hand and announce the marker.
+	if p.StageForMessageContains("[PR_OPENED]") == nil {
+		t.Error("manual announcement fallback lost")
+	}
+}
+
+// open_pr with a configured base must survive the round trip too.
+func TestOpenPRBaseIsParsed(t *testing.T) {
+	p, err := Parse([]byte(`
+stages:
+    - id: test
+      entry: true
+      on_enter:
+        open_pr:
+            base: develop
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got := p.Stages[0].OnEnter.OpenPR; got == nil || got.Base != "develop" {
+		t.Fatalf("OpenPR = %+v, want base develop", got)
+	}
+}

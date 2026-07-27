@@ -945,6 +945,19 @@ func (s *Server) runOnEnter(clawID string, stage pipeline.Stage, ctx pipelineCon
 		}
 	}
 
+	if stage.OnEnter.OpenPR != nil {
+		log.Printf("[pipeline] opening pull request for claw %s stage %q", clawID[:8], stage.ID)
+		if _, err := s.executeOpenPRAction(clawID, stage.OnEnter.OpenPR, ctx); err != nil {
+			// Degrade to the pre-feature behaviour instead of failing the stage: the
+			// agent can do these steps itself, exactly as it did before open_pr
+			// existed, so a GitHub hiccup costs seconds-to-minutes rather than the run.
+			msg := fmt.Sprintf("Opening the pull request failed: %v", err)
+			log.Printf("[pipeline] %s", msg)
+			s.injectHubMessageByID(clawID, "[hub] "+msg+
+				"\nPush your branch and open the pull request yourself, then announce it the way this workflow asks.")
+		}
+	}
+
 	if dependencyUpdatesConfigured(stage.OnEnter.DependencyUpdates) {
 		outputName := dependencyUpdatesOutputName(stage.OnEnter.DependencyUpdates)
 		log.Printf("[pipeline] running dependency updates for claw %s stage %q output %q", clawID[:8], stage.ID, outputName)
