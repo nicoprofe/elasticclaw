@@ -32,6 +32,14 @@ package main
 // ec_open_window creates the window and blocks in the GTK main loop until it is
 // closed. It returns 0 on success, or 1 when there is no usable display.
 static int ec_open_window(const char *url, const char *title, int width, int height) {
+	// The window's WM_CLASS is what a dock or task switcher matches against the
+	// StartupWMClass in the desktop entry. Left alone, GTK derives it from argv[0]
+	// — "elasticclaw-desktop" — which matches nothing, so the running app appears as
+	// a separate nameless icon next to its own launcher. These two calls set the
+	// instance and class names, and must happen before gtk_init reads them.
+	g_set_prgname("elasticclaw");
+	gdk_set_program_class("ElasticClaw");
+
 	// gtk_init_check rather than gtk_init: the latter calls exit() when it cannot
 	// open a display, which would kill the process with no message the user can act
 	// on. Returning lets Go report something useful instead.
@@ -41,6 +49,9 @@ static int ec_open_window(const char *url, const char *title, int width, int hei
 
 	GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_title(GTK_WINDOW(window), title);
+	// Resolved from the icon theme, where runInstall put a 512x512 PNG under
+	// hicolor. Without it the window and the alt-tab switcher show a placeholder.
+	gtk_window_set_icon_name(GTK_WINDOW(window), "elasticclaw");
 	gtk_window_set_default_size(GTK_WINDOW(window), width, height);
 	gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER);
 

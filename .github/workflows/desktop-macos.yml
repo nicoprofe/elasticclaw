@@ -1,0 +1,135 @@
+name: Desktop app (macOS)
+
+# Builds and verifies ElasticClaw.app on a real Apple Silicon runner without cutting
+# a release, and attaches the result as a downloadable artifact.
+#
+# This exists because the macOS app cannot be tested anywhere else. It needs cgo
+# against WebKit, so it cannot be cross-compiled; its two most dangerous failure
+# modes — an unsigned binary, which arm64 refuses to execute, and a missing ATS
+# exemption, which opens a blank window — are invisible on any other platform. The
+# only alternative to this job is finding someone with a Mac and asking them to
+# check, which is how a broken download shipped in the first place.
+#
+# macos-14 is Apple Silicon, which is the architecture that actually enforces the
+# signing rule. GitHub-hosted macOS minutes are free on public repositories.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    # Only for changes that can affect the bundle. Every other PR skips this job
+    # rather than spending ten minutes proving nothing changed.
+    paths:
+      - "cmd/elasticclaw-desktop/**"
+      - "scripts/build-release.sh"
+      - "scripts/package-macos-app.sh"
+      - "scripts/verify-macos-app.sh"
+      - "build/macos/**"
+      - ".github/workflows/desktop-macos.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the build script uses git describe
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build the macOS desktop app and bundle it
+        env:
+          # Not a release tag: a dev version keeps these artifacts obviously distinct
+          # from anything published, while still exercising the version normalisation
+          # the packaging script does.
+          VERSION: v0.0.0-dev
+          DESKTOP_TARGET: darwin
+        run: ./scripts/build-release.sh
+
+      - name: Check the app bundle is well formed
+        run: ./scripts/verify-macos-app.sh dist
+
+      - name: Smoke test that the app starts and serves the dashboard
+        env:
+          ELASTICCLAW_NO_INSTALL_PROMPT: "1"
+        run: |
+          # Run the bundle's own executable rather than `open`: a CI runner has no
+          # reliable window server, and what this proves is that the app starts its
+          # hub — the part that fails silently. The window backend is covered by the
+          # linker having resolved WebKit at build time.
+          exe=dist/ElasticClaw.app/Contents/MacOS/ElasticClaw
+          export HOME="$(mktemp -d)"
+          "$exe" &
+          app_pid=$!
+
+          ok=0
+          for _ in $(seq 1 40); do
+            if ! kill -0 "$app_pid" 2>/dev/null; then
+              echo "::error::the app exited on its own; log follows"
+              cat "$HOME/.elasticclaw/desktop.log" 2>/dev/null || true
+              exit 1
+            fi
+            for port in 8080 8081 8082 18080; do
+              if curl -fsS -o /dev/null "http://127.0.0.1:${port}/login" 2>/dev/null; then
+                echo "hub answered on ${port}"
+                ok=1
+                break
+              fi
+            done
+            [ "$ok" = 1 ] && break
+            sleep 3
+          done
+
+          kill "$app_pid" 2>/dev/null || true
+          if [ "$ok" != 1 ]; then
+            echo "::error::the app never served the dashboard; log follows"
+            cat "$HOME/.elasticclaw/desktop.log" 2>/dev/null || true
+            exit 1
+          fi
+
+      - name: Check the install and uninstall paths
+        run: |
+          # --install is the code that runs when a user accepts the "move to
+          # Applications?" offer. /Applications is writable on the runner, so this
+          # exercises the real path rather than the fallback.
+          app=dist/ElasticClaw.app
+          "$app/Contents/MacOS/ElasticClaw" --install
+          test -d /Applications/ElasticClaw.app || {
+            echo "::error::--install did not put the app in /Applications"
+            exit 1
+          }
+          # A copy that lost its signature on the way would fail to launch for the
+          # user with no explanation.
+          codesign --verify --strict /Applications/ElasticClaw.app || {
+            echo "::error::the installed copy is not validly signed"
+            exit 1
+          }
+          # Installing twice must replace cleanly rather than fail or merge.
+          "$app/Contents/MacOS/ElasticClaw" --install
+
+          "$app/Contents/MacOS/ElasticClaw" --uninstall
+          test ! -e /Applications/ElasticClaw.app || {
+            echo "::error::--uninstall left the app behind"
+            exit 1
+          }
+
+      # This is the point of running the job on demand: a real, signed .app someone
+      # can download and double-click on their own Mac before a release is tagged.
+      # GitHub wraps artifacts in a zip of its own, so what lands is a zip
+      # containing ElasticClaw-macos.zip.
+      - name: Upload the app for manual testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: ElasticClaw-macos-${{ github.sha }}
+          path: dist/ElasticClaw-macos.zip
+          if-no-files-found: error
+          retention-days: 14

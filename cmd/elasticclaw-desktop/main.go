@@ -26,10 +26,16 @@ import (
 var Version = "dev"
 
 func main() {
+	// LaunchServices appends a -psn_0_12345 process-serial-number argument when it
+	// starts a bundled app on macOS. It is not a flag anyone passed, and leaving it
+	// in argv makes a Finder launch look like a launch with arguments — which
+	// silently skips the install offer below. Drop it before anything reads args.
+	args := stripLaunchServicesArgs(os.Args[1:])
+
 	// Installation runs before the log is redirected, so its output reaches a
 	// console when invoked from one.
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
+	if len(args) > 0 {
+		switch args[0] {
 		case "--install", "/install":
 			if err := runInstall(); err != nil {
 				fatal("Install failed.\n\n" + err.Error())
@@ -48,7 +54,7 @@ func main() {
 	// Started with no arguments from outside the install directory — a
 	// double-click on a freshly downloaded exe. Offer to install first, so the app
 	// ends up in the Start menu instead of only ever running from Downloads.
-	if len(os.Args) == 1 && maybeOfferInstall() {
+	if len(args) == 0 && maybeOfferInstall() {
 		return // the installed copy is now running in our place
 	}
 

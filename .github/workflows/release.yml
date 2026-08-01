@@ -179,11 +179,60 @@ jobs:
           done
           exit $missing
 
+      # The bundle is what ships, so the bundle is what gets checked. The script is
+      # shared with the on-demand desktop-macos workflow so the two cannot drift.
+      - name: Check the app bundle is well formed
+        run: ./scripts/verify-macos-app.sh dist
+
+      - name: Smoke test that the app starts and serves the dashboard
+        env:
+          # The bundle is not in /Applications here, so a normal launch would put up
+          # the "move to Applications?" dialog and wait forever for a click.
+          ELASTICCLAW_NO_INSTALL_PROMPT: "1"
+        run: |
+          # The bundle executable is run directly rather than through `open`: a CI
+          # runner has no reliable window server, and this test is about the app
+          # starting its hub, which is the part that breaks silently. The window
+          # backend is covered by the linker having resolved WebKit at build time.
+          exe=dist/ElasticClaw.app/Contents/MacOS/ElasticClaw
+          export HOME="$(mktemp -d)"
+          "$exe" &
+          app_pid=$!
+
+          ok=0
+          for _ in $(seq 1 40); do
+            if ! kill -0 "$app_pid" 2>/dev/null; then
+              echo "::error::the app exited on its own; log follows"
+              cat "$HOME/.elasticclaw/desktop.log" 2>/dev/null || true
+              exit 1
+            fi
+            for port in 8080 8081 8082 18080; do
+              if curl -fsS -o /dev/null "http://127.0.0.1:${port}/login" 2>/dev/null; then
+                echo "hub answered on ${port}"
+                ok=1
+                break
+              fi
+            done
+            [ "$ok" = 1 ] && break
+            sleep 3
+          done
+
+          kill "$app_pid" 2>/dev/null || true
+          if [ "$ok" != 1 ]; then
+            echo "::error::the app never served the dashboard; log follows"
+            cat "$HOME/.elasticclaw/desktop.log" 2>/dev/null || true
+            exit 1
+          fi
+
+      # Only the zip. The loose elasticclaw-desktop-darwin-* binaries are build
+      # inputs, not something a Mac user can install: a browser saves them without
+      # the execute bit and Finder will not launch them, which is exactly the trap
+      # this bundle replaces. Publishing them next to the app would keep the trap.
       - name: Upload into the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
-        run: gh release upload "$TAG" dist/elasticclaw-desktop-darwin-* --clobber
+        run: gh release upload "$TAG" dist/ElasticClaw-macos.zip --clobber
 
   desktop-linux:
     needs: release
@@ -217,6 +266,10 @@ jobs:
         run: ./scripts/build-release.sh
 
       - name: Smoke test that the window opens
+        env:
+          # xvfb-run sets DISPLAY, which is enough for the app to consider asking
+          # whether to add a desktop entry. There is nobody to answer.
+          ELASTICCLAW_NO_INSTALL_PROMPT: "1"
         run: |
           asset="dist/elasticclaw-desktop-linux-$(go env GOHOSTARCH)"
           test -f "$asset" || { echo "::error::missing $asset"; exit 1; }
@@ -300,6 +353,16 @@ jobs:
             grep -q "  ${f}\$" checksums.txt || { echo "::error::$f missing from checksums.txt"; missing=1; }
           done
           exit $missing
+
+      # A release whose macOS job went green but whose app never attached would look
+      # complete on the releases page while leaving Mac users nothing to download.
+      - name: Check the macOS app shipped
+        if: needs.desktop-macos.result == 'success'
+        run: |
+          grep -q '  ElasticClaw-macos.zip$' assets/checksums.txt || {
+            echo "::error::the macOS job succeeded but ElasticClaw-macos.zip is not attached to the release"
+            exit 1
+          }
 
       - name: Upload the manifest
         env:

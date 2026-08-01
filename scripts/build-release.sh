@@ -171,6 +171,12 @@ case "${DESKTOP_TARGET:-}" in
 darwin)
   build_desktop_darwin amd64 elasticclaw-desktop-darwin-amd64
   build_desktop_darwin arm64 elasticclaw-desktop-darwin-arm64
+  # The release ships the .app bundle, not these two files. A bare Mach-O binary is
+  # not installable on macOS: the browser saves it without the execute bit, Finder
+  # will not launch it, and it has no icon or name. Both binaries stay in dist/ as
+  # inputs to lipo and for the CI format check; only the zip is uploaded.
+  echo
+  VERSION="$VERSION" OUTPUT_DIR="$OUTPUT_DIR" scripts/package-macos-app.sh
   ;;
 linux)
   # Only the host architecture: cgo cross-compilation would need a full sysroot for

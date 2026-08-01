@@ -43,6 +43,9 @@ const (
 // Returns true when the caller should exit because the installed copy was
 // launched in its place.
 func maybeOfferInstall() bool {
+	if installPromptSuppressed() {
+		return false
+	}
 	self, err := os.Executable()
 	if err != nil {
 		return false
