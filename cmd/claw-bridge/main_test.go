@@ -4703,3 +4703,20 @@ func TestMaxIntPtr(t *testing.T) {
 		t.Fatal("max(nil,nil) must stay nil")
 	}
 }
+
+func TestDockerGitHubCloneScriptRetriesTransientCloneFailures(t *testing.T) {
+	script := dockerGitHubCloneScript("/home/node/.openclaw/workspace", []bootstrapRepoAccess{{
+		Repo: "praetoriandigital/kms-lambdas", Permissions: "write",
+	}})
+	for _, want := range []string{
+		"attempt=0; while :; do",
+		"git clone 'https://github.com/praetoriandigital/kms-lambdas.git' 'kms-lambdas' && break; rm -rf 'kms-lambdas'",
+		`if [ "$attempt" -ge 4 ]; then echo '[bootstrap] clone of praetoriandigital/kms-lambdas failed after 5 attempts'; exit 128; fi`,
+		`delay=$((2 << attempt)); attempt=$((attempt+1)); echo '[bootstrap] clone of praetoriandigital/kms-lambdas failed (attempt '"$attempt"'/5); retrying in '"$delay"'s'; sleep "$delay"; done`,
+		"test -d 'kms-lambdas/.git'",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("clone script missing %q:\n%s", want, script)
+		}
+	}
+}

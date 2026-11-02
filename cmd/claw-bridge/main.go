@@ -4432,6 +4432,13 @@ func installDockerGitHubCredentialHelper() error {
 	return nil
 }
 
+// bootstrapCloneAttempts bounds the retry of one repository clone during
+// bootstrap. Pauses grow 2, 4, 8, 16 s (about 30 s in total): long enough to
+// outlast the propagation lag GitHub sometimes shows for a freshly minted App
+// installation token, short enough that a genuinely missing repository still
+// fails quickly and visibly.
+const bootstrapCloneAttempts = 5
+
 func dockerGitHubCloneScript(workspaceDir string, repos []bootstrapRepoAccess) string {
 	if len(repos) == 0 {
 		return ""
@@ -4448,8 +4455,18 @@ func dockerGitHubCloneScript(workspaceDir string, repos []bootstrapRepoAccess) s
 		dir := repoDirectoryName(repo.Repo)
 		cloneURL := "https://github.com/" + repo.Repo + ".git"
 		fmt.Fprintf(&b, "echo %s\n", shellQuote("[bootstrap] cloning "+repo.Repo+" into "+dir))
-		fmt.Fprintf(&b, "if [ ! -d %s ]; then git clone %s %s; else git -C %s remote set-url origin %s || true; git -C %s fetch origin; branch=\"$(git -C %s symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')\"; if [ -z \"$branch\" ]; then branch=\"$(git -C %s rev-parse --abbrev-ref HEAD)\"; fi; git -C %s reset --hard \"origin/$branch\"; fi\n",
-			shellQuote(dir), shellQuote(cloneURL), shellQuote(dir), shellQuote(dir), shellQuote(cloneURL), shellQuote(dir), shellQuote(dir), shellQuote(dir), shellQuote(dir))
+		// GitHub intermittently answers 404 "Repository not found" to a freshly
+		// minted App installation token for a few seconds (propagation lag); the
+		// same token works moments later. Retry each clone with exponential
+		// backoff instead of failing the whole claw on the first miss. A failed
+		// partial clone is removed before retrying; the credential helper returns
+		// the hub-cached token, so the retry reuses the token that has had time
+		// to propagate. After the last attempt the bootstrap still fails as
+		// before, so a genuinely missing repository is never silently skipped.
+		fmt.Fprintf(&b, "attempt=0; while :; do if [ ! -d %s ]; then git clone %s %s && break; rm -rf %s; else ( set -e; git -C %s remote set-url origin %s || true; git -C %s fetch origin; branch=\"$(git -C %s symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')\"; if [ -z \"$branch\" ]; then branch=\"$(git -C %s rev-parse --abbrev-ref HEAD)\"; fi; git -C %s reset --hard \"origin/$branch\" ) && break; fi; if [ \"$attempt\" -ge %d ]; then echo %s; exit 128; fi; delay=$((2 << attempt)); attempt=$((attempt+1)); echo %s; sleep \"$delay\"; done\n",
+			shellQuote(dir), shellQuote(cloneURL), shellQuote(dir), shellQuote(dir), shellQuote(dir), shellQuote(cloneURL), shellQuote(dir), shellQuote(dir), shellQuote(dir), shellQuote(dir),
+			bootstrapCloneAttempts-1, shellQuote("[bootstrap] clone of "+repo.Repo+" failed after "+strconv.Itoa(bootstrapCloneAttempts)+" attempts"),
+			shellQuote("[bootstrap] clone of "+repo.Repo+" failed (attempt ")+`"$attempt"`+shellQuote("/"+strconv.Itoa(bootstrapCloneAttempts)+"); retrying in ")+`"$delay"`+shellQuote("s"))
 		fmt.Fprintf(&b, "test -d %s\n", shellQuote(filepath.Join(dir, ".git")))
 	}
 	return b.String()
